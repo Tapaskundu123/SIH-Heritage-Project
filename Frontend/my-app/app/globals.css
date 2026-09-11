@@ -1,0 +1,418 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+/* ============================================
+   KarigarSetu Design System
+   Warm Indian Craft Aesthetic + Dark Mode
+   ============================================ */
+
+/* ---- Color Tokens ---- */
+:root {
+  /* Saffron / Orange — Primary */
+  --saffron-50: #fff7ed;
+  --saffron-100: #ffedd5;
+  --saffron-200: #fed7aa;
+  --saffron-300: #fdba74;
+  --saffron-400: #fb923c;
+  --saffron-500: #f97316;
+  --saffron-600: #ea6c0a;
+  --saffron-700: #c2570b;
+
+  /* Indigo / Royal Blue — Accent */
+  --indigo-400: #818cf8;
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;
+  --indigo-700: #4338ca;
+
+  /* Terracotta / Earthy */
+  --terra-400: #cd7c5b;
+  --terra-500: #b5603d;
+  --terra-600: #9a4c2f;
+
+  /* Emerald — Success */
+  --emerald-400: #34d399;
+  --emerald-500: #10b981;
+
+  /* Backgrounds */
+  --bg-dark: #0c0908;
+  --bg-dark-2: #14100e;
+  --bg-dark-3: #1e1712;
+  --bg-card: #1e1712;
+  --bg-card-hover: #261d17;
+
+  /* Text */
+  --text-primary: #f5efe6;
+  --text-secondary: #c4a882;
+  --text-muted: #7d6548;
+
+  /* Borders */
+  --border-subtle: rgba(245, 190, 130, 0.12);
+  --border-medium: rgba(245, 190, 130, 0.22);
+  --border-strong: rgba(249, 115, 22, 0.4);
+
+  /* Glass */
+  --glass-bg: rgba(30, 23, 18, 0.7);
+  --glass-border: rgba(249, 115, 22, 0.15);
+}
+
+@theme inline {
+  --color-background: var(--bg-dark);
+  --color-foreground: var(--text-primary);
+  --font-sans: "Inter", sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-devanagari: "Noto Sans Devanagari", sans-serif;
+}
+
+/* ---- Global Reset ---- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: "Inter", sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark-2);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--saffron-700);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--saffron-500);
+}
+
+/* ---- Typography ---- */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Outfit", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* ---- Gradients ---- */
+.gradient-saffron {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #c2570b 100%);
+}
+
+.gradient-hero {
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(249,115,22,0.3), transparent),
+              radial-gradient(ellipse 60% 50% at 80% 80%, rgba(99,102,241,0.15), transparent),
+              var(--bg-dark);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #f97316, #fbbf24, #f97316);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-cool {
+  background: linear-gradient(135deg, #818cf8, #6366f1, #4f46e5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ---- Glass Cards ---- */
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 16px;
+}
+
+.glass-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card-hover:hover {
+  background: rgba(38, 29, 23, 0.8);
+  border-color: rgba(249, 115, 22, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 30px rgba(249, 115, 22, 0.08);
+}
+
+/* ---- Buttons ---- */
+.btn-primary {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: white;
+  font-family: "Outfit", sans-serif;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 24px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #fb923c, #f97316);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.btn-primary:hover::before {
+  opacity: 1;
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
+  font-family: "Outfit", sans-serif;
+  border-radius: 10px;
+  padding: 12px 24px;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+
+.btn-ghost:hover {
+  border-color: var(--saffron-500);
+  color: var(--saffron-400);
+  background: rgba(249, 115, 22, 0.06);
+}
+
+/* ---- Mic Button Animation ---- */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+  50% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+}
+
+@keyframes mic-ring {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.mic-recording {
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+.mic-ring {
+  animation: mic-ring 1.5s ease-out infinite;
+}
+
+/* ---- Waveform ---- */
+@keyframes wave-bar {
+  0%, 100% { height: 6px; }
+  50% { height: 32px; }
+}
+
+.wave-bar {
+  width: 4px;
+  border-radius: 2px;
+  background: var(--saffron-500);
+  animation: wave-bar 0.8s ease-in-out infinite;
+}
+
+/* ---- Shimmer Loading ---- */
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, var(--bg-dark-3) 25%, var(--bg-card-hover) 50%, var(--bg-dark-3) 75%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ---- Floating Animation ---- */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.float-anim {
+  animation: float 4s ease-in-out infinite;
+}
+
+/* ---- Input Styles ---- */
+.input-dark {
+  background: var(--bg-dark-3);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-family: "Inter", sans-serif;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  outline: none;
+}
+
+.input-dark::placeholder {
+  color: var(--text-muted);
+}
+
+.input-dark:focus {
+  border-color: var(--saffron-500);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+}
+
+/* ---- Badge ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: "Outfit", sans-serif;
+}
+
+.badge-saffron {
+  background: rgba(249, 115, 22, 0.15);
+  color: var(--saffron-400);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+}
+
+.badge-green {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.badge-red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.badge-indigo {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--indigo-400);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+/* ---- Glow Effects ---- */
+.glow-saffron {
+  box-shadow: 0 0 30px rgba(249, 115, 22, 0.3), 0 0 80px rgba(249, 115, 22, 0.1);
+}
+
+.glow-text-saffron {
+  text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);
+}
+
+/* ---- Decorative Pattern ---- */
+.mandala-bg {
+  background-image: url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23f97316' fill-opacity='0.03'%3E%3Cpath d='M40 0C17.9 0 0 17.9 0 40s17.9 40 40 40 40-17.9 40-40S62.1 0 40 0zm0 72C22.3 72 8 57.7 8 40S22.3 8 40 8s32 14.3 32 32-14.3 32-32 32z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* ---- Sidebar ---- */
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-family: "Outfit", sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.sidebar-item:hover {
+  background: rgba(249, 115, 22, 0.08);
+  color: var(--text-primary);
+}
+
+.sidebar-item.active {
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--saffron-400);
+  border: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+/* ---- Page Transitions ---- */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: page-in 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stat Card ---- */
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 24px;
+  transition: all 0.3s;
+}
+
+.stat-card:hover {
+  border-color: var(--border-medium);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+
+/* ---- Upload Zone ---- */
+.upload-zone {
+  border: 2px dashed var(--border-medium);
+  border-radius: 16px;
+  background: var(--bg-dark-2);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.upload-zone:hover, .upload-zone.drag-active {
+  border-color: var(--saffron-500);
+  background: rgba(249, 115, 22, 0.04);
+}
+
+/* ---- Pipeline Step ---- */
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  transition: all 0.3s;
+}
+
+.pipeline-step.active {
+  border-color: var(--saffron-500);
+  background: rgba(249, 115, 22, 0.06);
+}
+
+.pipeline-step.done {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+  .sidebar-desktop {
+    display: none;
+  }
+}
