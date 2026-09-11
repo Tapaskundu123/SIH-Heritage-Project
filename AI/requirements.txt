@@ -1,0 +1,41 @@
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9
+pydantic==2.7.4
+httpx==0.27.0
+
+# PyTorch with CUDA support (install separately via: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121)
+# torch>=2.3.0+cu121
+# torchvision>=0.18.0+cu121
+# torchaudio>=2.3.0+cu121
+
+# Hugging Face
+transformers==4.41.2
+datasets==2.20.0
+sentencepiece==0.2.0
+accelerate==0.31.0
+optimum==1.20.0
+
+# ASR — Whisper
+openai-whisper==20231117
+ffmpeg-python==0.2.0
+
+# Image Processing
+Pillow==10.3.0
+opencv-python-headless==4.10.0.82
+rembg[gpu]==2.0.57
+onnxruntime-gpu==1.18.0
+
+# Real-ESRGAN for image enhancement
+basicsr==1.4.2
+realesrgan==0.3.0
+
+# Language Detection
+langdetect==1.0.9
+lingua-language-detector==2.0.2
+
+# Utilities
+numpy==1.26.4
+aiofiles==23.2.1
+python-dotenv==1.0.1
+loguru==0.7.2
