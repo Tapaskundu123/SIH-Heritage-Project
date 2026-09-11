@@ -44,6 +44,5 @@ const InventorySchema = new Schema<IInventory>(
 );
 
 InventorySchema.index({ artisanId: 1 });
-InventorySchema.index({ productId: 1 });
 
 export default mongoose.model<IInventory>('Inventory', InventorySchema);
