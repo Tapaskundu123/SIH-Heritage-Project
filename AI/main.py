@@ -12,7 +12,14 @@ from loguru import logger
 from config import settings
 from routers import voice, image, catalog, pricing
 
-# Configure logger
+# Configure logger with UTF-8 support on Windows
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 logger.remove()
 logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}", level="INFO")
 
@@ -23,22 +30,49 @@ async def lifespan(app: FastAPI):
     logger.info(f"🖥️  Device: {settings.DEVICE}")
     logger.info(f"📁 Models cache: {settings.MODELS_DIR}")
 
-    # Warm up models
+    # 1. Background removal (BiRefNet) — Local model, loads in ~1s
     try:
-        from services.whisper_service import WhisperService
-        from services.translation_service import TranslationService
-        from services.extraction_service import ExtractionService
         from services.bg_removal_service import BGRemovalService
-
-        app.state.whisper = WhisperService()
-        app.state.translator = TranslationService()
-        app.state.extractor = ExtractionService()
         app.state.bg_remover = BGRemovalService()
-
-        logger.success("✅ All AI models loaded successfully!")
+        logger.success("✅ BiRefNet background removal loaded")
     except Exception as e:
-        logger.error(f"❌ Model loading error: {e}")
-        logger.warning("⚠️  Service starting in degraded mode — some features may be unavailable")
+        logger.error(f"❌ BG removal model failed: {e}")
+
+    # 2. Image Enhancement (OpenCV CLAHE) — Instant
+    try:
+        from services.image_enhance_service import ImageEnhanceService
+        app.state.enhancer = ImageEnhanceService()
+        logger.success("✅ Image enhancement service loaded")
+    except Exception as e:
+        logger.error(f"❌ Image enhancement service failed: {e}")
+
+    # 3. Voice & NLP models — Load in background thread so server starts instantly
+    import threading
+
+    def _load_nlp_models():
+        try:
+            from services.whisper_service import WhisperService
+            app.state.whisper = WhisperService()
+            logger.success("✅ Whisper ASR loaded")
+        except Exception as e:
+            logger.error(f"❌ Whisper ASR failed: {e}")
+
+        try:
+            from services.translation_service import TranslationService
+            app.state.translator = TranslationService()
+            logger.success("✅ Translation service loaded")
+        except Exception as e:
+            logger.error(f"❌ Translation service failed: {e}")
+
+        try:
+            from services.extraction_service import ExtractionService
+            app.state.extractor = ExtractionService()
+            logger.success("✅ Extraction service loaded")
+        except Exception as e:
+            logger.error(f"❌ Extraction service failed: {e}")
+
+    nlp_thread = threading.Thread(target=_load_nlp_models, daemon=True, name="nlp_loader")
+    nlp_thread.start()
 
     yield  # App runs here
 
@@ -52,11 +86,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# CORS — allow web app (Next.js :3000), Node backend (:5000), and direct AI studio calls
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5000"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5000",
+        # Allow any origin for local development (tighten in production)
+        "*",
+    ],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -83,7 +125,14 @@ async def health():
             "translator": hasattr(app.state, "translator"),
             "extractor": hasattr(app.state, "extractor"),
             "bg_remover": hasattr(app.state, "bg_remover"),
+            "enhancer": hasattr(app.state, "enhancer"),
         },
+        "ai_studio_endpoints": [
+            "/ai/image/remove-bg",
+            "/ai/image/enhance",
+            "/ai/image/process-complete",
+            "/ai/image/studio",
+        ],
     }
 
 

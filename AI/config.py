@@ -3,6 +3,15 @@ Configuration for KarigarSetu AI Service
 Detects CUDA device (RTX 4050) automatically
 """
 import os
+import sys
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import torch
 from pydantic_settings import BaseSettings
 from pathlib import Path
@@ -46,8 +55,11 @@ settings = Settings()
 os.makedirs(settings.MODELS_DIR, exist_ok=True)
 
 # Log device info
-if torch.cuda.is_available():
-    gpu = torch.cuda.get_device_properties(0)
-    print(f"🖥️  GPU: {gpu.name} | VRAM: {gpu.total_memory / 1024**3:.1f} GB | CUDA: {torch.version.cuda}")
-else:
-    print("⚠️  CUDA not available — running on CPU (slower inference)")
+try:
+    if torch.cuda.is_available():
+        gpu = torch.cuda.get_device_properties(0)
+        print(f"GPU: {gpu.name} | VRAM: {gpu.total_memory / 1024**3:.1f} GB | CUDA: {torch.version.cuda}")
+    else:
+        print("CUDA not available — running on CPU (slower inference)")
+except Exception:
+    pass

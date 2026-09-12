@@ -1,29 +1,106 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import {
   Upload, X, Scissors, Sparkles, Download, RefreshCw,
-  ImageIcon, Loader2, Check, AlertCircle, Wand2, Eye
+  ImageIcon, Loader2, Check, AlertCircle, Wand2, Zap,
+  ChevronRight, Info, ShoppingBag, Layers, Eye, EyeOff
 } from "lucide-react";
 
-type ProcessStep = "original" | "bg-removed" | "enhanced" | "ecommerce";
+// AI service runs on port 8000 directly
+const AI_BASE = process.env.NEXT_PUBLIC_AI_URL || "http://localhost:8000";
 
-interface ProcessedImage {
+type ProcessStep = "original" | "bg-removed" | "enhanced" | "ecommerce";
+type Operation = "remove_bg" | "enhance" | "ecommerce" | "all";
+
+interface PipelineStage {
+  id: string;
+  label: string;
+  sublabel: string;
+  icon: React.ReactNode;
+  color: string;
+}
+
+interface ProcessedImages {
   original: string;
   bgRemoved?: string;
   enhanced?: string;
   ecommerce?: string;
 }
 
+interface PipelineProgress {
+  stage: number;   // 0 = idle, 1 = bg, 2 = enhance, 3 = ecom
+  done: number[];
+}
+
+const PIPELINE_STAGES: PipelineStage[] = [
+  {
+    id: "bg",
+    label: "BiRefNet",
+    sublabel: "Background removal",
+    icon: <Scissors size={14} />,
+    color: "#f97316",
+  },
+  {
+    id: "enhance",
+    label: "OpenCV CLAHE",
+    sublabel: "Contrast & sharpening",
+    icon: <Zap size={14} />,
+    color: "#818cf8",
+  },
+  {
+    id: "ecom",
+    label: "Studio Render",
+    sublabel: "1024×1024 canvas",
+    icon: <ShoppingBag size={14} />,
+    color: "#10b981",
+  },
+];
+
+const OPERATIONS: { id: Operation; label: string; desc: string; icon: React.ReactNode; accent: string; steps: string[] }[] = [
+  {
+    id: "remove_bg",
+    label: "Remove Background",
+    desc: "Transparent PNG — uses BiRefNet deep matting",
+    icon: <Scissors size={18} />,
+    accent: "#f97316",
+    steps: ["BiRefNet segmentation", "Edge refinement", "Alpha compositing"],
+  },
+  {
+    id: "enhance",
+    label: "Enhance Quality",
+    desc: "CLAHE + denoising + sharpening with OpenCV",
+    icon: <Sparkles size={18} />,
+    accent: "#818cf8",
+    steps: ["Adaptive brightness", "CLAHE local contrast", "NlMeans denoising", "Unsharp mask"],
+  },
+  {
+    id: "all",
+    label: "Full Pipeline",
+    desc: "BG remove → enhance → 1024×1024 e-commerce image",
+    icon: <Layers size={18} />,
+    accent: "#10b981",
+    steps: ["BiRefNet BG removal", "OpenCV enhancement", "E-commerce canvas"],
+  },
+];
+
 export default function AIStudioPage() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [processing, setProcessing] = useState<string | null>(null);
-  const [images, setImages] = useState<ProcessedImage | null>(null);
+  const [operation, setOperation] = useState<Operation>("all");
+  const [processing, setProcessing] = useState(false);
+  const [images, setImages] = useState<ProcessedImages | null>(null);
   const [activeView, setActiveView] = useState<ProcessStep>("original");
   const [error, setError] = useState("");
+  const [pipeline, setPipeline] = useState<PipelineProgress>({ stage: 0, done: [] });
+  const [bgBackdrop, setBgBackdrop] = useState<"checker" | "white" | "dark" | "cream">("checker");
+  const [peekOriginal, setPeekOriginal] = useState(false);
+
+  const getAuthHeaders = () => ({
+    Authorization: `Bearer ${localStorage.getItem("ks_token") || ""}`,
+  });
 
   const onDrop = useCallback((accepted: File[]) => {
     if (accepted[0]) {
@@ -32,6 +109,7 @@ export default function AIStudioPage() {
       setImages(null);
       setError("");
       setActiveView("original");
+      setPipeline({ stage: 0, done: [] });
     }
   }, []);
 
@@ -42,170 +120,302 @@ export default function AIStudioPage() {
     multiple: false,
   });
 
-  const getAuthHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem("ks_token")}`,
-  });
+  const resetFile = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFile(null);
+    setPreview(null);
+    setImages(null);
+    setError("");
+    setPipeline({ stage: 0, done: [] });
+  };
 
-  const removeBackground = async () => {
+  // ---- Single operations ----
+  const runRemoveBg = async () => {
     if (!file) return;
-    setProcessing("bg");
+    setProcessing(true);
+    setPipeline({ stage: 1, done: [] });
     setError("");
     try {
-      const formData = new FormData();
-      formData.append("image", file);
-      const res = await axios.post("http://localhost:5000/api/ai/image/remove-bg", formData, {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await axios.post(`${AI_BASE}/ai/image/remove-bg`, fd, {
         headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
         responseType: "blob",
         timeout: 120000,
       });
       const url = URL.createObjectURL(res.data);
-      setImages((prev) => ({ ...prev, original: preview!, bgRemoved: url }));
+      setImages((p) => ({ ...p, original: preview!, bgRemoved: url }));
       setActiveView("bg-removed");
-    } catch {
-      setError("Background removal failed. Make sure AI service is running.");
+      setPipeline({ stage: 0, done: [1] });
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Background removal failed — is the AI service running on port 8000?");
+      setPipeline({ stage: 0, done: [] });
     } finally {
-      setProcessing(null);
+      setProcessing(false);
     }
   };
 
-  const enhanceImage = async () => {
+  const runEnhance = async () => {
     if (!file) return;
-    setProcessing("enhance");
+    setProcessing(true);
+    setPipeline({ stage: 2, done: [] });
     setError("");
     try {
-      const formData = new FormData();
-      formData.append("image", file);
-      const res = await axios.post("http://localhost:5000/api/ai/image/enhance", formData, {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await axios.post(`${AI_BASE}/ai/image/enhance`, fd, {
         headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
         responseType: "blob",
         timeout: 120000,
       });
       const url = URL.createObjectURL(res.data);
-      setImages((prev) => ({ ...prev, original: preview!, enhanced: url }));
+      setImages((p) => ({ ...p, original: preview!, enhanced: url }));
       setActiveView("enhanced");
-    } catch {
-      setError("Image enhancement failed. Make sure AI service is running.");
+      setPipeline({ stage: 0, done: [2] });
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Enhancement failed — is the AI service running on port 8000?");
+      setPipeline({ stage: 0, done: [] });
     } finally {
-      setProcessing(null);
+      setProcessing(false);
     }
   };
 
-  const downloadImage = (src: string, name: string) => {
-    const link = document.createElement("a");
-    link.href = src;
-    link.download = name;
-    link.click();
+  const runFullPipeline = async () => {
+    if (!file) return;
+    setProcessing(true);
+    setError("");
+    setPipeline({ stage: 1, done: [] });
+
+    try {
+      // Animate stage progression
+      const stageDelay = (ms: number) =>
+        new Promise((resolve) => setTimeout(resolve, ms));
+
+      const fd = new FormData();
+      fd.append("image", file);
+
+      // Kick off the request
+      const promise = axios.post(`${AI_BASE}/ai/image/process-complete`, fd, {
+        headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
+        timeout: 180000,
+      });
+
+      // Animate stages while waiting (estimated timing)
+      await stageDelay(3000);
+      setPipeline({ stage: 2, done: [1] });
+      await stageDelay(4000);
+      setPipeline({ stage: 3, done: [1, 2] });
+
+      const res = await promise;
+      const data = res.data.data;
+
+      const bgRemovedUrl = `data:image/png;base64,${data.no_background}`;
+      const enhancedUrl = `data:image/jpeg;base64,${data.enhanced}`;
+      const ecomUrl = `data:image/jpeg;base64,${data.ecommerce_ready}`;
+
+      setImages({
+        original: preview!,
+        bgRemoved: bgRemovedUrl,
+        enhanced: enhancedUrl,
+        ecommerce: ecomUrl,
+      });
+      setActiveView("ecommerce");
+      setPipeline({ stage: 0, done: [1, 2, 3] });
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || "Pipeline failed — is the AI service running on port 8000?");
+      setPipeline({ stage: 0, done: [] });
+    } finally {
+      setProcessing(false);
+    }
   };
 
-  const VIEW_TABS: { key: ProcessStep; label: string; available: boolean }[] = [
+  const handleProcess = () => {
+    if (operation === "remove_bg") return runRemoveBg();
+    if (operation === "enhance") return runEnhance();
+    return runFullPipeline();
+  };
+
+  // ---- Download ----
+  const downloadImage = (src: string, name: string) => {
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = name;
+    a.click();
+  };
+
+  // ---- View tabs ----
+  const VIEW_TABS: { key: ProcessStep; label: string; available: boolean; color?: string }[] = [
     { key: "original", label: "Original", available: !!preview },
-    { key: "bg-removed", label: "BG Removed", available: !!images?.bgRemoved },
-    { key: "enhanced", label: "Enhanced", available: !!images?.enhanced },
+    { key: "bg-removed", label: "BG Removed", available: !!images?.bgRemoved, color: "#f97316" },
+    { key: "enhanced", label: "Enhanced", available: !!images?.enhanced, color: "#818cf8" },
+    { key: "ecommerce", label: "E-Commerce ✨", available: !!images?.ecommerce, color: "#10b981" },
   ];
 
-  const currentImg = activeView === "original" ? preview
+  const currentImg =
+    activeView === "original" ? preview
     : activeView === "bg-removed" ? images?.bgRemoved
     : activeView === "enhanced" ? images?.enhanced
     : images?.ecommerce;
 
+  const displayImg = peekOriginal && images?.original ? images.original : currentImg;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6 page-enter" style={{ padding: "0 0 40px" }}>
+      {/* ---- Page Header ---- */}
       <div>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-2">
           <span className="badge badge-indigo">AI Powered</span>
-          <span className="badge badge-saffron">CUDA Accelerated</span>
+          <span className="badge badge-saffron">BiRefNet + OpenCV</span>
+          <span className="badge badge-green">CUDA Accelerated</span>
         </div>
-        <h1 className="text-3xl font-black" style={{ fontFamily: "Outfit" }}>
-          🖼️ AI Product Photo Studio
+        <h1 className="text-4xl font-black mb-2 gradient-text" style={{ fontFamily: "Outfit" }}>
+          AI Product Studio
         </h1>
-        <p style={{ color: "#c4a882" }}>
-          Turn your phone photos into professional e-commerce product images.
+        <p style={{ color: "var(--text-secondary)", fontSize: 15 }}>
+          Transform phone photos into professional e-commerce images using BiRefNet deep-matting and OpenCV enhancement.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Upload zone */}
-        <div className="space-y-4">
-          <div {...getRootProps()} className={`upload-zone p-8 text-center transition-all ${isDragActive ? "drag-active" : ""}`}
-            style={{ minHeight: 200 }}>
-            <input {...getInputProps()} id="studio-upload" />
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* ======== LEFT PANEL ======== */}
+        <div className="lg:col-span-2 space-y-4">
+
+          {/* Upload Zone */}
+          <div
+            {...getRootProps()}
+            id="studio-upload-zone"
+            className={`upload-zone transition-all cursor-pointer ${isDragActive ? "drag-active" : ""}`}
+            style={{ padding: 0, minHeight: 220, position: "relative", overflow: "hidden" }}
+          >
+            <input {...getInputProps()} id="studio-file-input" />
             {preview ? (
-              <div className="relative">
-                <img src={preview} alt="Upload preview" className="max-h-48 mx-auto rounded-lg object-contain" />
-                <button className="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ background: "rgba(0,0,0,0.5)" }}
-                  onClick={(e) => { e.stopPropagation(); setFile(null); setPreview(null); setImages(null); }}>
-                  <X size={14} style={{ color: "white" }} />
+              <div style={{ position: "relative", width: "100%", height: 220 }}>
+                <img
+                  src={preview}
+                  alt="Uploaded product"
+                  style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 14, background: "var(--bg-dark-3)" }}
+                />
+                <button
+                  id="studio-clear-btn"
+                  onClick={resetFile}
+                  style={{
+                    position: "absolute", top: 10, right: 10,
+                    width: 28, height: 28, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.65)", border: "none", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  <X size={14} color="white" />
                 </button>
+                <div style={{
+                  position: "absolute", bottom: 10, left: 10,
+                  background: "rgba(0,0,0,0.6)", borderRadius: 8, padding: "3px 10px",
+                  fontSize: 11, color: "#c4a882", fontFamily: "Outfit",
+                }}>
+                  {file?.name} · {(file!.size / 1024).toFixed(0)}KB
+                </div>
               </div>
             ) : (
-              <div>
-                <Upload size={36} className="mx-auto mb-3" style={{ color: isDragActive ? "#f97316" : "#7d6548" }} />
-                <p className="font-semibold" style={{ fontFamily: "Outfit", color: isDragActive ? "#f97316" : "#c4a882" }}>
-                  {isDragActive ? "Drop it here!" : "Upload Product Photo"}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 220, padding: 24 }}>
+                <div style={{
+                  width: 64, height: 64, borderRadius: 16,
+                  background: isDragActive ? "rgba(249,115,22,0.2)" : "rgba(249,115,22,0.08)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  marginBottom: 16, transition: "all 0.3s",
+                }}>
+                  <Upload size={28} color={isDragActive ? "#f97316" : "#7d6548"} />
+                </div>
+                <p style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 15, color: isDragActive ? "#f97316" : "var(--text-primary)", marginBottom: 6 }}>
+                  {isDragActive ? "Drop to upload!" : "Upload Product Photo"}
                 </p>
-                <p className="text-sm mt-1" style={{ color: "#7d6548" }}>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
                   Drag & drop or click · JPG, PNG, WEBP · Max 20MB
                 </p>
               </div>
             )}
           </div>
 
+          {/* Operation Selector */}
+          {file && (
+            <div className="glass-card" style={{ padding: 16 }}>
+              <p style={{ fontSize: 11, fontFamily: "Outfit", fontWeight: 600, color: "var(--text-muted)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Processing Mode
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {OPERATIONS.map((op) => (
+                  <button
+                    key={op.id}
+                    id={`studio-op-${op.id}`}
+                    onClick={() => setOperation(op.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+                      border: `1px solid ${operation === op.id ? op.accent + "50" : "rgba(196,168,130,0.1)"}`,
+                      background: operation === op.id ? `${op.accent}10` : "transparent",
+                      transition: "all 0.2s", textAlign: "left",
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                      background: operation === op.id ? `${op.accent}25` : "rgba(196,168,130,0.06)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: operation === op.id ? op.accent : "var(--text-muted)",
+                      transition: "all 0.2s",
+                    }}>
+                      {op.icon}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <p style={{ fontFamily: "Outfit", fontWeight: 600, fontSize: 13, color: operation === op.id ? op.accent : "var(--text-primary)", marginBottom: 2 }}>
+                        {op.label}
+                      </p>
+                      <p style={{ fontSize: 11, color: "var(--text-muted)" }}>{op.desc}</p>
+                    </div>
+                    {operation === op.id && <ChevronRight size={14} color={op.accent} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Process button */}
+          {file && !processing && (
+            <button
+              id="studio-process-btn"
+              onClick={handleProcess}
+              className="btn-primary w-full"
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "14px 24px", fontSize: 15 }}
+            >
+              <span style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+                <Wand2 size={18} />
+                {operation === "remove_bg" ? "Remove Background"
+                  : operation === "enhance" ? "Enhance Image"
+                  : "Run Full Pipeline"}
+              </span>
+            </button>
+          )}
+
+          {/* Error */}
           {error && (
-            <div className="flex items-start gap-2 p-3 rounded-lg text-sm"
-              style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171" }}>
-              <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", borderRadius: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#f87171", fontSize: 13 }}>
+              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
               {error}
             </div>
           )}
 
-          {/* Action buttons */}
+          {/* How it works */}
           {file && (
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={removeBackground} disabled={!!processing}
-                className="glass-card glass-card-hover p-4 text-left transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ border: "1px solid rgba(249,115,22,0.2)" }}>
-                <div className="flex items-center gap-2 mb-1">
-                  {processing === "bg" ? <Loader2 size={18} className="animate-spin" style={{ color: "#f97316" }} /> : <Scissors size={18} style={{ color: "#f97316" }} />}
-                  <span className="font-semibold text-sm" style={{ fontFamily: "Outfit", color: "#f5efe6" }}>Remove BG</span>
-                </div>
-                <p className="text-xs" style={{ color: "#7d6548" }}>
-                  {processing === "bg" ? "Processing with U2Net..." : "Transparent background PNG"}
+            <div className="glass-card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                <Info size={13} color="var(--text-muted)" />
+                <p style={{ fontSize: 11, fontFamily: "Outfit", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  AI Pipeline
                 </p>
-                {images?.bgRemoved && <Check size={12} style={{ color: "#34d399" }} className="mt-1" />}
-              </button>
-
-              <button onClick={enhanceImage} disabled={!!processing}
-                className="glass-card glass-card-hover p-4 text-left transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ border: "1px solid rgba(99,102,241,0.2)" }}>
-                <div className="flex items-center gap-2 mb-1">
-                  {processing === "enhance" ? <Loader2 size={18} className="animate-spin" style={{ color: "#818cf8" }} /> : <Sparkles size={18} style={{ color: "#818cf8" }} />}
-                  <span className="font-semibold text-sm" style={{ fontFamily: "Outfit", color: "#f5efe6" }}>Enhance</span>
-                </div>
-                <p className="text-xs" style={{ color: "#7d6548" }}>
-                  {processing === "enhance" ? "Denoising & sharpening..." : "2x upscale, sharpen, denoise"}
-                </p>
-                {images?.enhanced && <Check size={12} style={{ color: "#34d399" }} className="mt-1" />}
-              </button>
-            </div>
-          )}
-
-          {/* Processing steps */}
-          {file && (
-            <div className="glass-card p-4">
-              <h4 className="text-xs font-semibold mb-3" style={{ fontFamily: "Outfit", color: "#c4a882" }}>
-                HOW IT WORKS
-              </h4>
-              <div className="space-y-2">
-                {[
-                  { icon: "📸", step: "Upload phone photo of your product" },
-                  { icon: "✂️", step: "Remove background with U2Net AI (rembg)" },
-                  { icon: "✨", step: "Auto-enhance: denoise, sharpen, white-balance" },
-                  { icon: "📦", step: "Download e-commerce ready 1024×1024 image" },
-                ].map((s, i) => (
-                  <div key={i} className="flex items-center gap-3 text-sm">
-                    <span>{s.icon}</span>
-                    <span style={{ color: "#c4a882" }}>{s.step}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {OPERATIONS.find(o => o.id === operation)?.steps.map((step, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 5, height: 5, borderRadius: "50%", background: OPERATIONS.find(o => o.id === operation)!.accent, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{step}</span>
                   </div>
                 ))}
               </div>
@@ -213,47 +423,344 @@ export default function AIStudioPage() {
           )}
         </div>
 
-        {/* Result preview */}
-        <div className="space-y-4">
+        {/* ======== RIGHT PANEL ======== */}
+        <div className="lg:col-span-3 space-y-4">
+
+          {/* Pipeline Progress (during full pipeline) */}
+          {processing && operation === "all" && (
+            <div className="glass-card" style={{ padding: 20 }}>
+              <p style={{ fontSize: 12, fontFamily: "Outfit", fontWeight: 600, color: "var(--text-muted)", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Processing Pipeline
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {PIPELINE_STAGES.map((stage, i) => {
+                  const stageNum = i + 1;
+                  const isDone = pipeline.done.includes(stageNum);
+                  const isActive = pipeline.stage === stageNum;
+                  return (
+                    <div
+                      key={stage.id}
+                      className={`pipeline-step ${isActive ? "active" : ""} ${isDone ? "done" : ""}`}
+                    >
+                      <div style={{
+                        width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+                        background: isDone ? "rgba(16,185,129,0.2)" : isActive ? `${stage.color}20` : "rgba(196,168,130,0.06)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: isDone ? "#10b981" : isActive ? stage.color : "var(--text-muted)",
+                        transition: "all 0.4s",
+                      }}>
+                        {isDone ? <Check size={14} /> : isActive ? <Loader2 size={14} className="animate-spin" /> : stage.icon}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontFamily: "Outfit", fontWeight: 600, fontSize: 13, color: isDone ? "#10b981" : isActive ? stage.color : "var(--text-muted)" }}>
+                          {stage.label}
+                        </p>
+                        <p style={{ fontSize: 11, color: "var(--text-muted)" }}>{stage.sublabel}</p>
+                      </div>
+                      {isDone && <span style={{ fontSize: 11, color: "#10b981", fontFamily: "Outfit", fontWeight: 600 }}>Done</span>}
+                      {isActive && <span style={{ fontSize: 11, color: stage.color, fontFamily: "Outfit", fontWeight: 600 }}>Running...</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Single-op spinner */}
+          {processing && operation !== "all" && (
+            <div className="glass-card" style={{ padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+              <Loader2 size={40} className="animate-spin" color="#f97316" />
+              <p style={{ fontFamily: "Outfit", fontWeight: 600, color: "var(--text-primary)" }}>
+                {operation === "remove_bg" ? "BiRefNet removing background..." : "OpenCV enhancing image..."}
+              </p>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>This may take 15–60 seconds on first run</p>
+            </div>
+          )}
+
           {/* View tabs */}
-          <div className="flex gap-2">
-            {VIEW_TABS.filter((t) => t.available).map((tab) => (
-              <button key={tab.key}
-                onClick={() => setActiveView(tab.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeView === tab.key ? "gradient-saffron text-white" : "btn-ghost"}`}
-                style={{ fontFamily: "Outfit" }}>
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="rounded-2xl overflow-hidden flex items-center justify-center"
-            style={{ background: activeView === "bg-removed" ? "repeating-conic-gradient(#2a2a2a 0% 25%, #1a1a1a 0% 50%) 0 0 / 20px 20px" : "var(--bg-dark-3)", minHeight: 320 }}>
-            {currentImg ? (
-              <img src={currentImg} alt="Result" className="max-w-full max-h-80 object-contain" />
-            ) : processing ? (
-              <div className="text-center p-8">
-                <Loader2 size={48} className="animate-spin mx-auto mb-4" style={{ color: "#f97316" }} />
-                <p style={{ color: "#c4a882" }}>
-                  {processing === "bg" ? "Removing background..." : "Enhancing image quality..."}
-                </p>
-                <p className="text-sm mt-2" style={{ color: "#7d6548" }}>Running AI on RTX 4050...</p>
+          {!processing && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {VIEW_TABS.filter((t) => t.available).map((tab) => {
+                  const isSelected = activeView === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      id={`studio-tab-${tab.key}`}
+                      onClick={() => {
+                        setActiveView(tab.key);
+                        setPeekOriginal(false);
+                      }}
+                      style={{
+                        padding: "7px 16px",
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontFamily: "Outfit",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                        background: isSelected
+                          ? (tab.color ? `${tab.color}20` : "rgba(249,115,22,0.15)")
+                          : "rgba(255,255,255,0.03)",
+                        color: isSelected
+                          ? (tab.color || "#f97316")
+                          : "var(--text-secondary)",
+                        border: isSelected
+                          ? `1px solid ${tab.color || "#f97316"}`
+                          : "1px solid rgba(255,255,255,0.08)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      {tab.key === "bg-removed" && <Scissors size={12} />}
+                      {tab.key === "enhanced" && <Sparkles size={12} />}
+                      {tab.key === "ecommerce" && <ShoppingBag size={12} />}
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
-            ) : (
-              <div className="text-center p-8">
-                <ImageIcon size={48} className="mx-auto mb-3" style={{ color: "#7d6548" }} />
-                <p style={{ color: "#7d6548" }}>Upload an image to get started</p>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {currentImg && currentImg !== preview && (
-            <button onClick={() => downloadImage(currentImg, `karigarsetu-${activeView}.${activeView === "bg-removed" ? "png" : "jpg"}`)}
-              className="btn-primary w-full py-2.5 flex items-center justify-center gap-2">
-              <span className="relative z-10 flex items-center gap-2">
-                <Download size={16} /> Download {VIEW_TABS.find((t) => t.key === activeView)?.label}
-              </span>
-            </button>
+          {/* ---- Professional Studio Viewport ---- */}
+          {!processing && (
+            <div
+              style={{
+                borderRadius: 16,
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.08)",
+                background:
+                  activeView === "bg-removed"
+                    ? bgBackdrop === "white"
+                      ? "#ffffff"
+                      : bgBackdrop === "cream"
+                      ? "#f8f5ee"
+                      : bgBackdrop === "dark"
+                      ? "#151518"
+                      : "repeating-conic-gradient(#262629 0% 25%, #18181a 0% 50%) 0 0 / 20px 20px"
+                    : activeView === "ecommerce"
+                    ? "#ffffff"
+                    : "var(--bg-dark-3)",
+                minHeight: 400,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative",
+                userSelect: "none",
+                padding: 24,
+                transition: "background 0.3s ease",
+              }}
+            >
+              {/* Floating Studio Toolbar */}
+              {displayImg && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: 14,
+                    right: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    zIndex: 10,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {/* Status chip */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "5px 12px",
+                      borderRadius: 20,
+                      background: "rgba(18,18,22,0.8)",
+                      backdropFilter: "blur(12px)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: peekOriginal ? "#f59e0b" : VIEW_TABS.find((t) => t.key === activeView)?.color || "#f5efe6",
+                      fontSize: 11,
+                      fontFamily: "Outfit",
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: peekOriginal ? "#f59e0b" : VIEW_TABS.find((t) => t.key === activeView)?.color || "#f97316",
+                      }}
+                    />
+                    {peekOriginal ? "Viewing Original Photo" : VIEW_TABS.find((t) => t.key === activeView)?.label}
+                  </div>
+
+                  {/* Right side studio tools */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, pointerEvents: "auto" }}>
+                    {/* Backdrop palette for BG-removed PNGs */}
+                    {activeView === "bg-removed" && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "4px 10px",
+                          borderRadius: 20,
+                          background: "rgba(18,18,22,0.8)",
+                          backdropFilter: "blur(12px)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                        }}
+                      >
+                        <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "Outfit", marginRight: 2 }}>Canvas:</span>
+                        {[
+                          { id: "checker", label: "Transparent", bg: "repeating-conic-gradient(#666 0% 25%, #333 0% 50%) 0 0 / 6px 6px" },
+                          { id: "white", label: "Pure White", bg: "#ffffff" },
+                          { id: "cream", label: "Studio Cream", bg: "#f8f5ee" },
+                          { id: "dark", label: "Charcoal", bg: "#151518" },
+                        ].map((b) => (
+                          <button
+                            key={b.id}
+                            title={b.label}
+                            onClick={() => setBgBackdrop(b.id as any)}
+                            style={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: "50%",
+                              background: b.bg,
+                              border: bgBackdrop === b.id ? "2px solid #f97316" : "1px solid rgba(255,255,255,0.3)",
+                              cursor: "pointer",
+                              padding: 0,
+                              transform: bgBackdrop === b.id ? "scale(1.2)" : "scale(1)",
+                              transition: "transform 0.15s",
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Hold to Peek Original */}
+                    {images?.original && activeView !== "original" && (
+                      <button
+                        onMouseDown={() => setPeekOriginal(true)}
+                        onMouseUp={() => setPeekOriginal(false)}
+                        onMouseLeave={() => setPeekOriginal(false)}
+                        onTouchStart={() => setPeekOriginal(true)}
+                        onTouchEnd={() => setPeekOriginal(false)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "5px 12px",
+                          borderRadius: 20,
+                          background: peekOriginal ? "rgba(249,115,22,0.25)" : "rgba(18,18,22,0.8)",
+                          backdropFilter: "blur(12px)",
+                          border: peekOriginal ? "1px solid #f97316" : "1px solid rgba(255,255,255,0.1)",
+                          color: peekOriginal ? "#f97316" : "var(--text-secondary)",
+                          fontSize: 11,
+                          fontFamily: "Outfit",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                          userSelect: "none",
+                        }}
+                      >
+                        {peekOriginal ? <EyeOff size={13} /> : <Eye size={13} />}
+                        {peekOriginal ? "Original" : "Hold to Peek"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Full Image Display */}
+              {displayImg ? (
+                <img
+                  src={displayImg}
+                  alt={activeView}
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 480,
+                    objectFit: "contain",
+                    borderRadius: 6,
+                    filter:
+                      activeView === "bg-removed" && (bgBackdrop === "white" || bgBackdrop === "cream")
+                        ? "drop-shadow(0 14px 28px rgba(0,0,0,0.15))"
+                        : "none",
+                    transition: "filter 0.25s ease",
+                  }}
+                />
+              ) : (
+                <div style={{ textAlign: "center", padding: 40 }}>
+                  <ImageIcon size={48} color="var(--text-muted)" style={{ margin: "0 auto 12px" }} />
+                  <p style={{ color: "var(--text-muted)", fontFamily: "Outfit" }}>
+                    {file ? "Click a processing mode on the left to start" : "Upload an image to open studio"}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ---- Download + All-outputs grid ---- */}
+          {!processing && images && (
+            <>
+              {currentImg && currentImg !== preview && (
+                <button
+                  id="studio-download-btn"
+                  onClick={() => downloadImage(currentImg, `karigarsetu-${activeView}.${activeView === "bg-removed" ? "png" : "jpg"}`)}
+                  className="btn-primary w-full"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "13px 24px" }}
+                >
+                  <span style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+                    <Download size={16} />
+                    Download {VIEW_TABS.find((t) => t.key === activeView)?.label}
+                    {activeView === "bg-removed" ? " (PNG)" : " (JPEG)"}
+                  </span>
+                </button>
+              )}
+
+              {/* All outputs thumbnail grid */}
+              {(images.bgRemoved || images.enhanced || images.ecommerce) && (
+                <div className="glass-card" style={{ padding: 16 }}>
+                  <p style={{ fontSize: 11, fontFamily: "Outfit", fontWeight: 600, color: "var(--text-muted)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    All Outputs
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    {([
+                      { key: "bg-removed" as ProcessStep, label: "BG Removed", src: images.bgRemoved, color: "#f97316", ext: "png" },
+                      { key: "enhanced" as ProcessStep, label: "Enhanced", src: images.enhanced, color: "#818cf8", ext: "jpg" },
+                      { key: "ecommerce" as ProcessStep, label: "E-Commerce", src: images.ecommerce, color: "#10b981", ext: "jpg" },
+                    ]).filter(o => o.src).map((out) => (
+                      <div key={out.key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div
+                          onClick={() => setActiveView(out.key)}
+                          style={{
+                            borderRadius: 10, overflow: "hidden", cursor: "pointer",
+                            border: `2px solid ${activeView === out.key ? out.color : "transparent"}`,
+                            background: out.key === "bg-removed"
+                              ? "repeating-conic-gradient(#2a2a2a 0% 25%, #1a1a1a 0% 50%) 0 0 / 10px 10px"
+                              : "var(--bg-dark-3)",
+                            transition: "border-color 0.2s",
+                          }}
+                        >
+                          <img src={out.src} alt={out.label} style={{ width: "100%", aspectRatio: "1/1", objectFit: "contain" }} />
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 10, color: out.color, fontFamily: "Outfit", fontWeight: 600 }}>{out.label}</span>
+                          <button
+                            id={`studio-dl-${out.key}`}
+                            onClick={() => downloadImage(out.src!, `karigarsetu-${out.key}.${out.ext}`)}
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}
+                          >
+                            <Download size={12} color="var(--text-muted)" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

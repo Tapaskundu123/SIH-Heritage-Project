@@ -1,5 +1,5 @@
-from pathlib import Path
 from io import BytesIO
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -151,85 +151,110 @@ def FB_blur_fusion_foreground_estimator(
 
 
 # ---------------------------------------------------------
-# Load BiRefNet once
+# Load BiRefNet once (module-level singleton)
 # ---------------------------------------------------------
 
 print("Loading BiRefNet...")
 print("Model path:", MODEL_DIR)
 print("Device:", DEVICE)
 
-model = AutoModelForImageSegmentation.from_pretrained(
+_model = AutoModelForImageSegmentation.from_pretrained(
     str(MODEL_DIR),
     trust_remote_code=True
 )
 
 if DEVICE == "cpu":
-    model = model.float()
+    _model = _model.float()
 else:
-    model = model.half()
+    _model = _model.half()
 
-model = model.to(DEVICE)
-model.eval()
+_model = _model.to(DEVICE)
+_model.eval()
 
 print("BiRefNet loaded successfully.")
 
 
 # ---------------------------------------------------------
-# Background removal
+# Low-level PIL -> PIL function (used internally)
 # ---------------------------------------------------------
 
-def remove_background(image: Image.Image) -> Image.Image:
-
+def _remove_background_pil(image: Image.Image) -> Image.Image:
+    """
+    Remove background from a PIL Image.
+    Returns RGBA PIL Image with transparent background.
+    """
     image = image.convert("RGB")
-
     original_size = image.size
 
-    # Preprocess exactly like the model handler
-    preprocessor = ImagePreprocessor(
-        resolution=(1024, 1024)
-    )
+    preprocessor = ImagePreprocessor(resolution=(1024, 1024))
 
     image_tensor = preprocessor.proc(image)
     image_tensor = image_tensor.unsqueeze(0)
-
     image_tensor = image_tensor.to(DEVICE)
 
     if DEVICE != "cpu":
         image_tensor = image_tensor.half()
 
-    # -----------------------------------------------------
-    # Prediction
-    # -----------------------------------------------------
-
     with torch.no_grad():
-
-        preds = model(image_tensor)
-
-        # Official handler uses the final output
-        pred = (
-            preds[-1]
-            .sigmoid()
-            .cpu()
-        )
+        preds = _model(image_tensor)
+        pred = preds[-1].sigmoid().cpu()
 
     pred = pred[0].squeeze()
-
-    # Convert prediction to PIL mask
     pred_pil = transforms.ToPILImage()(pred)
 
-    # Refine foreground
-    foreground = refine_foreground(
-        image,
-        pred_pil
-    )
+    foreground = refine_foreground(image, pred_pil)
 
-    # Resize mask to original image dimensions
-    mask = pred_pil.resize(
-        original_size
-    )
+    mask = pred_pil.resize(original_size)
 
-    # Add alpha channel
     foreground = foreground.convert("RGBA")
     foreground.putalpha(mask)
 
     return foreground
+
+
+# ---------------------------------------------------------
+# BGRemovalService class — bytes-based interface
+# (This is what main.py loads and the router uses)
+# ---------------------------------------------------------
+
+class BGRemovalService:
+    """
+    Background removal service wrapping BiRefNet.
+
+    All public methods accept image bytes and return image bytes,
+    making them directly usable from FastAPI route handlers.
+    """
+
+    def remove_background(self, image_bytes: bytes) -> bytes:
+        """
+        Remove background. Returns PNG bytes with transparent background.
+        """
+        image = Image.open(BytesIO(image_bytes))
+        result = _remove_background_pil(image)
+
+        output = BytesIO()
+        result.save(output, format="PNG")
+        return output.getvalue()
+
+    def remove_and_add_white_bg(self, image_bytes: bytes) -> bytes:
+        """
+        Remove background and composite onto white. Returns JPEG bytes.
+        """
+        image = Image.open(BytesIO(image_bytes))
+        rgba = _remove_background_pil(image)
+
+        # Composite onto white canvas
+        white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        white.alpha_composite(rgba)
+        rgb = white.convert("RGB")
+
+        output = BytesIO()
+        rgb.save(output, format="JPEG", quality=95, optimize=True)
+        return output.getvalue()
+
+    def remove_background_pil(self, image: Image.Image) -> Image.Image:
+        """
+        PIL → PIL convenience method (used by the full pipeline).
+        Returns RGBA PIL Image.
+        """
+        return _remove_background_pil(image)
