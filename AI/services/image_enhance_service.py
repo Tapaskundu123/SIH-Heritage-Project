@@ -1,113 +1,286 @@
 """
-Image Enhancement Service using OpenCV + Real-ESRGAN
-Improves lighting, sharpness, and upscales product images
+Image Enhancement Service
+
+Takes the RGBA product image produced by BiRefNet and:
+1. Enhances the product itself
+2. Preserves the BiRefNet alpha mask
+3. Creates a clean white background
+4. Crops around the product
+5. Adds a small amount of padding
+6. Resizes to 1024x1024
 """
+
 import io
+
 import cv2
 import numpy as np
+
 from PIL import Image, ImageEnhance, ImageFilter
 from loguru import logger
 
 
 class ImageEnhanceService:
-    """OpenCV + PIL based image enhancement for product photography"""
+    """Enhance a BiRefNet product cutout for e-commerce."""
+
+    def create_ecommerce_ready(self, image: Image.Image) -> Image.Image:
+        """
+        Input:
+            RGBA PIL image from BiRefNet.
+
+        Output:
+            RGB 1024x1024 PIL image with white background.
+        """
+
+        logger.info("Enhancing product image...")
+
+        # --------------------------------------------------
+        # 1. Make sure we have RGBA
+        # --------------------------------------------------
+
+        image = image.convert("RGBA")
+
+        rgba = np.array(image)
+
+        rgb = rgba[:, :, :3]
+        alpha = rgba[:, :, 3]
+
+        # --------------------------------------------------
+        # 2. Find the product bounding box
+        # --------------------------------------------------
+
+        ys, xs = np.where(alpha > 10)
+
+        if len(xs) == 0:
+            logger.warning("No foreground found.")
+            return image.convert("RGB")
+
+        x1 = xs.min()
+        x2 = xs.max()
+        y1 = ys.min()
+        y2 = ys.max()
+
+        # Add padding around product
+        padding = 40
+
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(rgb.shape[1], x2 + padding)
+        y2 = min(rgb.shape[0], y2 + padding)
+
+        rgb = rgb[y1:y2 + 1, x1:x2 + 1]
+        alpha = alpha[y1:y2 + 1, x1:x2 + 1]
+
+        # --------------------------------------------------
+        # 3. Enhance only the product
+        # --------------------------------------------------
+
+        product = Image.fromarray(rgb, mode="RGB")
+
+        # --------------------------------------------------
+        # Adaptive brightness
+        # --------------------------------------------------
+
+        gray = product.convert("L")
+        mean_brightness = np.array(gray).mean()
+
+        if mean_brightness < 70:
+            # Dark product → stronger correction
+            factor = 1.12
+
+        elif mean_brightness < 100:
+            # Slightly dark → mild correction
+            factor = 1.07
+
+        elif mean_brightness > 210:
+            # Very bright → do not brighten
+            factor = 0.98
+
+        else:
+            # Normal exposure → almost unchanged
+            factor = 1.02
+
+        product = ImageEnhance.Brightness(
+            product
+        ).enhance(factor)
+
+        # --------------------------------------------------
+        # Conservative contrast
+        # --------------------------------------------------
+
+        product = ImageEnhance.Contrast(
+            product
+        ).enhance(1.06)
+
+        # --------------------------------------------------
+        # Natural color enhancement
+        # --------------------------------------------------
+
+        product = ImageEnhance.Color(
+            product
+        ).enhance(1.04)
+
+        # --------------------------------------------------
+        # Gentle sharpness
+        # --------------------------------------------------
+
+        product = ImageEnhance.Sharpness(
+            product
+        ).enhance(1.10)
+
+        # --------------------------------------------------
+        # 4. OpenCV local contrast enhancement
+        # --------------------------------------------------
+
+        product_cv = cv2.cvtColor(
+            np.array(product),
+            cv2.COLOR_RGB2BGR
+        )
+
+        lab = cv2.cvtColor(
+            product_cv,
+            cv2.COLOR_BGR2LAB
+        )
+
+        l_channel, a_channel, b_channel = cv2.split(lab)
+
+        # Reduced CLAHE strength to avoid over-processing
+        clahe = cv2.createCLAHE(
+            clipLimit=1.5,
+            tileGridSize=(8, 8)
+        )
+
+        l_channel = clahe.apply(l_channel)
+
+        lab = cv2.merge(
+            [l_channel, a_channel, b_channel]
+        )
+
+        product_cv = cv2.cvtColor(
+            lab,
+            cv2.COLOR_LAB2BGR
+        )
+
+        # --------------------------------------------------
+        # 5. Mild denoising
+        # --------------------------------------------------
+
+        product_cv = cv2.fastNlMeansDenoisingColored(
+            product_cv,
+            None,
+            3,
+            3,
+            7,
+            21
+        )
+
+        # --------------------------------------------------
+        # 6. Gentle sharpening
+        # --------------------------------------------------
+
+        blurred = cv2.GaussianBlur(
+            product_cv,
+            (0, 0),
+            1.0
+        )
+
+        product_cv = cv2.addWeighted(
+            product_cv,
+            1.08,
+            blurred,
+            -0.08,
+            0
+        )
+
+        product_rgb = cv2.cvtColor(
+            product_cv,
+            cv2.COLOR_BGR2RGB
+        )
+
+        # --------------------------------------------------
+        # 7. Rebuild RGBA
+        # --------------------------------------------------
+
+        enhanced_rgba = np.dstack(
+            [product_rgb, alpha]
+        )
+
+        enhanced = Image.fromarray(
+            enhanced_rgba,
+            mode="RGBA"
+        )
+
+        # --------------------------------------------------
+        # 8. Create square white canvas
+        # --------------------------------------------------
+
+        width, height = enhanced.size
+        max_side = max(width, height)
+
+        # Add 10% breathing room
+        canvas_size = int(max_side * 1.10)
+
+        canvas = Image.new(
+            "RGBA",
+            (canvas_size, canvas_size),
+            (255, 255, 255, 255)
+        )
+
+        offset_x = (
+            canvas_size - width
+        ) // 2
+
+        offset_y = (
+            canvas_size - height
+        ) // 2
+
+        canvas.alpha_composite(
+            enhanced,
+            (offset_x, offset_y)
+        )
+
+        # --------------------------------------------------
+        # 9. Resize to marketplace size
+        # --------------------------------------------------
+
+        canvas = canvas.resize(
+            (1024, 1024),
+            Image.Resampling.LANCZOS
+        )
+
+        # --------------------------------------------------
+        # 10. Final RGB image
+        # --------------------------------------------------
+
+        final_image = canvas.convert("RGB")
+
+        logger.success(
+            "Image enhancement completed."
+        )
+
+        return final_image
 
     def enhance(self, image_bytes: bytes) -> bytes:
         """
-        Full enhancement pipeline:
-        1. Denoise
-        2. Auto white balance
-        3. Contrast/brightness enhancement
-        4. Sharpening
-        5. Upscale (2x with OpenCV INTER_LANCZOS4)
+        Enhance an RGBA product image supplied as bytes.
+
+        Returns JPEG bytes.
         """
-        logger.info("✨ Enhancing image quality...")
 
-        # Load with PIL
-        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        image = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGBA")
 
-        # Auto-correct brightness if needed
-        pil_img = self._auto_brightness(pil_img)
+        final_image = self.create_ecommerce_ready(
+            image
+        )
 
-        # Enhance contrast
-        pil_img = ImageEnhance.Contrast(pil_img).enhance(1.2)
+        output = io.BytesIO()
 
-        # Enhance saturation (subtle vibrancy boost for craft products)
-        pil_img = ImageEnhance.Color(pil_img).enhance(1.15)
+        final_image.save(
+            output,
+            format="JPEG",
+            quality=95,
+            optimize=True
+        )
 
-        # Enhance sharpness
-        pil_img = ImageEnhance.Sharpness(pil_img).enhance(1.5)
-
-        # Convert to OpenCV
-        cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
-        # Denoise with fastNlMeansDenoisingColored
-        cv_img = cv2.fastNlMeansDenoisingColored(cv_img, None, 7, 7, 7, 21)
-
-        # Auto white balance
-        cv_img = self._auto_white_balance(cv_img)
-
-        # Upscale 2x (smooth interpolation)
-        h, w = cv_img.shape[:2]
-        if max(h, w) < 2000:  # Only upscale if smaller than 2K
-            cv_img = cv2.resize(cv_img, (w * 2, h * 2), interpolation=cv2.INTER_LANCZOS4)
-
-        # Convert back to PIL
-        final_pil = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
-
-        # Unsharp mask for final sharpening
-        final_pil = final_pil.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
-
-        # Save to bytes
-        output_buffer = io.BytesIO()
-        final_pil.save(output_buffer, format="JPEG", quality=95, optimize=True)
-        output_bytes = output_buffer.getvalue()
-
-        logger.success(f"✅ Enhancement done — output: {len(output_bytes) / 1024:.1f} KB")
-        return output_bytes
-
-    def _auto_brightness(self, img: Image.Image) -> Image.Image:
-        """Auto-correct brightness if image is too dark or too bright"""
-        gray = img.convert("L")
-        mean_brightness = np.array(gray).mean()
-
-        if mean_brightness < 80:  # Too dark
-            factor = 110 / mean_brightness
-            img = ImageEnhance.Brightness(img).enhance(min(factor, 2.0))
-        elif mean_brightness > 200:  # Too bright
-            factor = 160 / mean_brightness
-            img = ImageEnhance.Brightness(img).enhance(max(factor, 0.7))
-
-        return img
-
-    def _auto_white_balance(self, img: np.ndarray) -> np.ndarray:
-        """Simple gray world white balance algorithm"""
-        result = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        avg_a = np.average(result[:, :, 1])
-        avg_b = np.average(result[:, :, 2])
-
-        result[:, :, 1] = result[:, :, 1] - ((avg_a - 128) * (result[:, :, 0] / 255.0) * 1.1)
-        result[:, :, 2] = result[:, :, 2] - ((avg_b - 128) * (result[:, :, 0] / 255.0) * 1.1)
-
-        return cv2.cvtColor(result, cv2.COLOR_LAB2BGR)
-
-    def create_ecommerce_ready(self, image_bytes: bytes) -> bytes:
-        """Create square, white-background, enhanced product image (for listings)"""
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-
-        # Enhanced
-        enhanced_bytes = self.enhance(image_bytes)
-        img = Image.open(io.BytesIO(enhanced_bytes)).convert("RGB")
-
-        # Square crop with white padding
-        max_side = max(img.size)
-        square = Image.new("RGB", (max_side, max_side), (255, 255, 255))
-        offset = ((max_side - img.size[0]) // 2, (max_side - img.size[1]) // 2)
-        square.paste(img, offset)
-
-        # Resize to 1024x1024
-        square = square.resize((1024, 1024), Image.LANCZOS)
-
-        output_buffer = io.BytesIO()
-        square.save(output_buffer, format="JPEG", quality=95)
-        return output_buffer.getvalue()
+        return output.getvalue()

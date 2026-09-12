@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+
+# ML models
+models/
+
+# Python cache
+__pycache__/
+*/__pycache__/
+
+# Test images
+test.jpg
+test_final.jpg
+test_removed.png
+
+# Environment variables
+.env
+*.env
