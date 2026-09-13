@@ -156,3 +156,37 @@ export const getDashboardStats = async (req: Request & { userId?: string }, res:
     res.status(500).json({ success: false, message: 'Failed to fetch dashboard stats' });
   }
 };
+
+export const attachProductImages = async (req: Request & { userId?: string }, res: Response): Promise<void> => {
+  try {
+    const { images } = req.body;
+    if (!images || !Array.isArray(images)) {
+      res.status(400).json({ success: false, message: 'Images array is required' });
+      return;
+    }
+
+    const product = await Product.findOne({ _id: req.params.id, artisanId: req.userId });
+    if (!product) {
+      res.status(404).json({ success: false, message: 'Product not found' });
+      return;
+    }
+
+    for (const img of images) {
+      if (typeof img === 'string') {
+        product.images.push({ url: img, isOriginal: false, isEnhanced: true, isBgRemoved: false });
+      } else if (img && img.url) {
+        product.images.push({
+          url: img.url,
+          isOriginal: !!img.isOriginal,
+          isEnhanced: img.isEnhanced !== undefined ? img.isEnhanced : true,
+          isBgRemoved: !!img.isBgRemoved,
+        });
+      }
+    }
+
+    await product.save();
+    res.json({ success: true, message: 'Images attached to product successfully', data: product });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to attach images to product' });
+  }
+};

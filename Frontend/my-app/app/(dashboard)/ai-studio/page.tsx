@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import Link from "next/link";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import {
   Upload, X, Scissors, Sparkles, Download, RefreshCw,
   ImageIcon, Loader2, Check, AlertCircle, Wand2, Zap,
-  ChevronRight, Info, ShoppingBag, Layers, Eye, EyeOff
+  ChevronRight, Info, ShoppingBag, Layers, Eye, EyeOff,
+  ArrowRight, ShieldCheck, CheckCircle2
 } from "lucide-react";
 
 // AI service runs on port 8000 directly
@@ -97,6 +99,56 @@ export default function AIStudioPage() {
   const [pipeline, setPipeline] = useState<PipelineProgress>({ stage: 0, done: [] });
   const [bgBackdrop, setBgBackdrop] = useState<"checker" | "white" | "dark" | "cream">("checker");
   const [peekOriginal, setPeekOriginal] = useState(false);
+
+  // Target product integration (when opened from /products or /products/[id])
+  const [targetProductId, setTargetProductId] = useState<string | null>(null);
+  const [targetProductName, setTargetProductName] = useState<string | null>(null);
+  const [attachingToProduct, setAttachingToProduct] = useState(false);
+  const [attachSuccess, setAttachSuccess] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const pid = params.get("productId");
+      const pname = params.get("productName");
+      if (pid) setTargetProductId(pid);
+      if (pname) setTargetProductName(pname);
+    }
+  }, []);
+
+  const handleAttachToProduct = async () => {
+    if (!targetProductId || !images) return;
+    setAttachingToProduct(true);
+    setAttachSuccess(false);
+    setError("");
+    try {
+      const token = localStorage.getItem("ks_token");
+      const imagesToAttach = [];
+      if (images.ecommerce) {
+        imagesToAttach.push({ url: images.ecommerce, isOriginal: false, isEnhanced: true, isBgRemoved: false });
+      }
+      if (images.bgRemoved) {
+        imagesToAttach.push({ url: images.bgRemoved, isOriginal: false, isEnhanced: false, isBgRemoved: true });
+      }
+      if (images.enhanced) {
+        imagesToAttach.push({ url: images.enhanced, isOriginal: false, isEnhanced: true, isBgRemoved: false });
+      }
+      if (images.original) {
+        imagesToAttach.push({ url: images.original, isOriginal: true, isEnhanced: false, isBgRemoved: false });
+      }
+
+      await axios.post(
+        `http://localhost:5000/api/products/${targetProductId}/images`,
+        { images: imagesToAttach },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      setAttachSuccess(true);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "Failed to attach studio images to product");
+    } finally {
+      setAttachingToProduct(false);
+    }
+  };
 
   const getAuthHeaders = () => ({
     Authorization: `Bearer ${localStorage.getItem("ks_token") || ""}`,
@@ -275,6 +327,32 @@ export default function AIStudioPage() {
           Transform phone photos into professional e-commerce images using BiRefNet deep-matting and OpenCV enhancement.
         </p>
       </div>
+
+      {/* Target Product Context Banner */}
+      {targetProductId && (
+        <div className="glass-card p-4 border border-[#f97316]/50 bg-[#f97316]/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#f97316]/20 border border-[#f97316]/40 flex items-center justify-center text-[#f97316] flex-shrink-0">
+              <Sparkles size={20} className="animate-spin" style={{ animationDuration: "8s" }} />
+            </div>
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#f97316]">
+                Target Product Connected
+              </div>
+              <div className="text-base font-bold text-[#f5efe6]">
+                Adding studio photos for: <span className="text-[#fb923c]">{targetProductName || "Selected Product"}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <Link href={`/products/${targetProductId}`}>
+              <button className="btn-ghost py-1.5 px-3 text-xs flex items-center gap-1.5">
+                View Product <ArrowRight size={13} />
+              </button>
+            </Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* ======== LEFT PANEL ======== */}
@@ -717,6 +795,52 @@ export default function AIStudioPage() {
                     {activeView === "bg-removed" ? " (PNG)" : " (JPEG)"}
                   </span>
                 </button>
+              )}
+
+              {/* Attach directly to target product */}
+              {targetProductId && (
+                <div className="glass-card p-4 border border-emerald-500/30 bg-emerald-950/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <CheckCircle2 size={14} /> Attach Images to Product
+                    </span>
+                    <span className="text-[11px] text-[#c4a882]">{targetProductName || "Selected Product"}</span>
+                  </div>
+
+                  <button
+                    id="studio-attach-product-btn"
+                    onClick={handleAttachToProduct}
+                    disabled={attachingToProduct || attachSuccess}
+                    className="btn-primary w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 font-semibold text-sm"
+                  >
+                    <span className="relative z-10 flex items-center gap-2">
+                      {attachingToProduct ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" /> Attaching to Product...
+                        </>
+                      ) : attachSuccess ? (
+                        <>
+                          <Check size={16} /> Attached to {targetProductName || "Product"}!
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={16} /> Save & Attach Studio Images to {targetProductName || "Product"}
+                        </>
+                      )}
+                    </span>
+                  </button>
+
+                  {attachSuccess && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs text-emerald-300">Images added to product gallery!</span>
+                      <Link href={`/products/${targetProductId}`}>
+                        <button className="text-xs font-bold text-emerald-400 hover:underline flex items-center gap-1">
+                          View in Product Details <ArrowRight size={12} />
+                        </button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* All outputs thumbnail grid */}

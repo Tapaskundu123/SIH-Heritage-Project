@@ -4,6 +4,7 @@ import path from 'path';
 import {
   createProduct, getMyProducts, getProductById,
   updateProduct, deleteProduct, getMarketplaceProducts, getDashboardStats,
+  attachProductImages,
 } from '../controllers/product.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
@@ -25,6 +26,7 @@ router.get('/', authenticate, getMyProducts);
 router.post('/', authenticate, upload.array('images', 5), createProduct);
 router.get('/:id', getProductById);
 router.put('/:id', authenticate, updateProduct);
+router.post('/:id/images', authenticate, attachProductImages);
 router.delete('/:id', authenticate, deleteProduct);
 
 export default router;

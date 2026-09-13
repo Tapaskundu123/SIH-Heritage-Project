@@ -4,6 +4,7 @@ import FormData from 'form-data';
 import fs from 'fs';
 import { AuthRequest } from '../middleware/auth.middleware';
 import Draft, { IDraftImages, IDraftSpecs } from '../models/Draft';
+import Product from '../models/Product';
 import { saveBase64Image, saveBufferImage } from '../utils/storage.util';
 
 const AI_BASE = process.env.AI_SERVICE_URL || 'http://localhost:8000';
@@ -271,11 +272,31 @@ export const processStudioAndSaveDraft = async (req: AuthRequest, res: Response)
       });
     }
 
+    // If productId was provided, also attach new studio images directly to the product
+    let productUpdated = null;
+    if (req.body.productId) {
+      try {
+        const prod = await Product.findOne({ _id: req.body.productId, artisanId });
+        if (prod) {
+          prod.images.push(
+            { url: ecommerceReadyUrl, isOriginal: false, isEnhanced: true, isBgRemoved: false },
+            { url: noBgUrl, isOriginal: false, isEnhanced: false, isBgRemoved: true },
+            { url: originalUrl, isOriginal: true, isEnhanced: false, isBgRemoved: false }
+          );
+          await prod.save();
+          productUpdated = prod;
+        }
+      } catch (prodErr) {
+        console.warn('Auto-attaching images to product notice:', prodErr);
+      }
+    }
+
     res.status(201).json({
       success: true,
-      message: 'AI Product Studio images generated and draft saved successfully',
+      message: 'AI Product Studio images generated and saved successfully',
       data: {
         draft,
+        product: productUpdated,
         images: draftImages,
       },
     });
