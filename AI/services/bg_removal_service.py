@@ -151,27 +151,27 @@ def FB_blur_fusion_foreground_estimator(
 
 
 # ---------------------------------------------------------
-# Load BiRefNet once (module-level singleton)
+# Dynamic BiRefNet Model with Sequential GPU Release
 # ---------------------------------------------------------
 
-print("Loading BiRefNet...")
-print("Model path:", MODEL_DIR)
-print("Device:", DEVICE)
+_model = None
 
-_model = AutoModelForImageSegmentation.from_pretrained(
-    str(MODEL_DIR),
-    trust_remote_code=True
-)
+def _get_model():
+    global _model
+    from services.gpu_manager import release_gpu
+    if _model is None:
+        print(f"Loading BiRefNet from {MODEL_DIR}...")
+        _model = AutoModelForImageSegmentation.from_pretrained(
+            str(MODEL_DIR),
+            trust_remote_code=True
+        )
+        if DEVICE != "cpu":
+            _model = _model.half()
+        _model.eval()
 
-if DEVICE == "cpu":
-    _model = _model.float()
-else:
-    _model = _model.half()
-
-_model = _model.to(DEVICE)
-_model.eval()
-
-print("BiRefNet loaded successfully.")
+    if DEVICE == "cuda":
+        _model = _model.to("cuda")
+    return _model
 
 
 # ---------------------------------------------------------
@@ -181,35 +181,39 @@ print("BiRefNet loaded successfully.")
 def _remove_background_pil(image: Image.Image) -> Image.Image:
     """
     Remove background from a PIL Image.
-    Returns RGBA PIL Image with transparent background.
+    Loads to GPU -> performs inference -> immediately releases GPU VRAM.
     """
+    from services.gpu_manager import release_gpu
+
     image = image.convert("RGB")
     original_size = image.size
 
+    model = _get_model()
     preprocessor = ImagePreprocessor(resolution=(1024, 1024))
 
-    image_tensor = preprocessor.proc(image)
-    image_tensor = image_tensor.unsqueeze(0)
-    image_tensor = image_tensor.to(DEVICE)
-
+    image_tensor = preprocessor.proc(image).unsqueeze(0).to(DEVICE)
     if DEVICE != "cpu":
         image_tensor = image_tensor.half()
 
-    with torch.no_grad():
-        preds = _model(image_tensor)
-        pred = preds[-1].sigmoid().cpu()
+    try:
+        with torch.no_grad():
+            preds = model(image_tensor)
+            pred = preds[-1].sigmoid().cpu()
 
-    pred = pred[0].squeeze()
-    pred_pil = transforms.ToPILImage()(pred)
+        pred = pred[0].squeeze()
+        pred_pil = transforms.ToPILImage()(pred)
 
-    foreground = refine_foreground(image, pred_pil)
+        foreground = refine_foreground(image, pred_pil)
+        mask = pred_pil.resize(original_size)
 
-    mask = pred_pil.resize(original_size)
-
-    foreground = foreground.convert("RGBA")
-    foreground.putalpha(mask)
-
-    return foreground
+        foreground = foreground.convert("RGBA")
+        foreground.putalpha(mask)
+        return foreground
+    finally:
+        del image_tensor
+        if DEVICE == "cuda" and model is not None:
+            model.to("cpu")
+            release_gpu("BiRefNet")
 
 
 # ---------------------------------------------------------

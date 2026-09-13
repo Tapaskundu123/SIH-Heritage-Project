@@ -6,9 +6,17 @@ import whisper
 import torch
 import tempfile
 import os
-from pathlib import Path
 from loguru import logger
 from config import settings
+
+# Ensure ffmpeg from imageio-ffmpeg is in PATH
+try:
+    import imageio_ffmpeg
+    ffmpeg_dir = os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+except Exception:
+    pass
 
 
 # Whisper language codes for Indian languages
@@ -60,7 +68,11 @@ class WhisperService:
             options["language"] = INDIAN_LANGUAGES[language]
 
         logger.info(f"📝 Transcribing audio: {audio_path}")
-        result = self.model.transcribe(audio_path, **options)
+        try:
+            result = self.model.transcribe(audio_path, **options)
+        finally:
+            from services.gpu_manager import release_gpu
+            release_gpu("Whisper ASR")
 
         detected_lang_code = result.get("language", "unknown")
         # Reverse map from Whisper lang name to ISO code

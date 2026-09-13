@@ -9,6 +9,7 @@ import aiRoutes from './routes/ai.routes';
 import pricingRoutes from './routes/pricing.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import marketplaceRoutes from './routes/marketplace.routes';
+import draftRoutes from './routes/draft.routes';
 
 dotenv.config();
 
@@ -42,6 +43,7 @@ app.get('/', (_req, res) => {
       marketplace: '/api/marketplace',
       inventory: '/api/inventory',
       pricing: '/api/pricing',
+      drafts: '/api/drafts',
       ai: '/api/ai',
     },
   });
@@ -60,6 +62,7 @@ app.get('/health', (_req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/drafts', draftRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/inventory', inventoryRoutes);

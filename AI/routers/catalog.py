@@ -47,9 +47,9 @@ Make it 2-3 sentences with relevant hashtags for Instagram/Twitter."""
 
 @router.post("/generate")
 async def generate_catalog(request: Request, body: CatalogRequest):
-    """Generate professional product catalog entry using Flan-T5"""
-    if not hasattr(request.app.state, "extractor"):
-        raise HTTPException(503, "AI model not loaded")
+    """Generate professional product catalog entry using Qwen 2.5 3B / Smart Cataloger"""
+    from services.qwen_extraction_service import QwenExtractionService
+    qwen = getattr(request.app.state, "qwen_extractor", None) or QwenExtractionService()
 
     info = body.productInfo
     template = CATALOG_TEMPLATES.get(body.style, CATALOG_TEMPLATES["ecommerce"])
@@ -64,37 +64,18 @@ async def generate_catalog(request: Request, body: CatalogRequest):
     )
 
     try:
-        # Use extraction model for generation
-        tokenizer = request.app.state.extractor.tokenizer
-        model = request.app.state.extractor.model
+        # Extract and generate rich catalog entry
+        specs = qwen.extract(text_en=prompt, text_hi=info.get("description_hi"))
+        generated = specs.get("description_en") or prompt
 
-        import torch
-        from config import settings
-
-        inputs = tokenizer(
-            prompt, return_tensors="pt", max_length=512, truncation=True
-        ).to(settings.DEVICE)
-
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=400,
-                num_beams=4,
-                temperature=0.7,
-                do_sample=True,
-                repetition_penalty=1.3,
-            )
-
-        generated = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        # Translate to target language if not English
         result_translations = {"en": generated}
-
         if body.language != "en" and hasattr(request.app.state, "translator"):
             translated = request.app.state.translator.translate_from_english(
                 generated, target_lang=body.language
             )
             result_translations[body.language] = translated
+        elif specs.get("description_hi"):
+            result_translations["hi"] = specs["description_hi"]
 
         return {
             "success": True,
@@ -102,9 +83,9 @@ async def generate_catalog(request: Request, body: CatalogRequest):
                 "catalog_text": generated,
                 "translations": result_translations,
                 "style": body.style,
-                "product_name": info.get("name"),
+                "product_name": specs.get("name", info.get("name")),
+                "specs": specs,
             },
         }
-
     except Exception as e:
         raise HTTPException(500, f"Catalog generation failed: {str(e)}")

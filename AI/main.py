@@ -50,12 +50,30 @@ async def lifespan(app: FastAPI):
     import threading
 
     def _load_nlp_models():
+        # AI4Bharat IndicConformer
         try:
-            from services.whisper_service import WhisperService
-            app.state.whisper = WhisperService()
-            logger.success("✅ Whisper ASR loaded")
+            from services.indic_conformer_service import IndicConformerService
+            app.state.indic_conformer = IndicConformerService()
+            logger.success("✅ IndicConformer ASR loaded")
         except Exception as e:
-            logger.error(f"❌ Whisper ASR failed: {e}")
+            logger.warning(f"⚠️ IndicConformer init notice: {e}")
+
+        # IndicTrans2
+        try:
+            from services.indictrans_service import IndicTransService
+            app.state.indictrans = IndicTransService()
+            logger.success("✅ IndicTrans2 translation loaded")
+        except Exception as e:
+            logger.warning(f"⚠️ IndicTrans2 init notice: {e}")
+
+        # Qwen2.5-3B-Instruct (HF API)
+        # Qwen 2.5-3B-Instruct (HF API for long product specs)
+        try:
+            from services.qwen_extraction_service import QwenExtractionService
+            app.state.qwen_extractor = QwenExtractionService()
+            logger.success("✅ Qwen2.5-3B-Instruct extraction loaded")
+        except Exception as e:
+            logger.warning(f"⚠️ Qwen extractor init notice: {e}")
 
         try:
             from services.translation_service import TranslationService
@@ -63,13 +81,6 @@ async def lifespan(app: FastAPI):
             logger.success("✅ Translation service loaded")
         except Exception as e:
             logger.error(f"❌ Translation service failed: {e}")
-
-        try:
-            from services.extraction_service import ExtractionService
-            app.state.extractor = ExtractionService()
-            logger.success("✅ Extraction service loaded")
-        except Exception as e:
-            logger.error(f"❌ Extraction service failed: {e}")
 
     nlp_thread = threading.Thread(target=_load_nlp_models, daemon=True, name="nlp_loader")
     nlp_thread.start()
@@ -121,9 +132,10 @@ async def health():
         "device": settings.DEVICE,
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "N/A",
         "models_loaded": {
-            "whisper": hasattr(app.state, "whisper"),
+            "indic_conformer_local": hasattr(app.state, "indic_conformer"),
             "translator": hasattr(app.state, "translator"),
-            "extractor": hasattr(app.state, "extractor"),
+            "indictrans": hasattr(app.state, "indictrans"),
+            "qwen_extractor": hasattr(app.state, "qwen_extractor"),
             "bg_remover": hasattr(app.state, "bg_remover"),
             "enhancer": hasattr(app.state, "enhancer"),
         },

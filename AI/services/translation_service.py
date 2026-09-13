@@ -35,7 +35,7 @@ class TranslationService:
         self.tokenizer = AutoTokenizer.from_pretrained(settings.NLLB_MODEL)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             settings.NLLB_MODEL,
-            torch_dtype=torch.float16 if settings.DEVICE == "cuda" else torch.float32,
+            torch_dtype=torch.float32,
         ).to(settings.DEVICE)
         self.model.eval()
         logger.success("✅ NLLB Translation model loaded")
@@ -68,36 +68,46 @@ class TranslationService:
 
         logger.info(f"🔄 Translating {nllb_src} → {nllb_tgt}")
 
-        # Tokenize
-        self.tokenizer.src_lang = nllb_src
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=settings.NLLB_MAX_LENGTH,
-        ).to(settings.DEVICE)
-
-        # Translate
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
+        try:
+            # Tokenize
+            self.tokenizer.src_lang = nllb_src
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
                 max_length=settings.NLLB_MAX_LENGTH,
-                num_beams=4,
-                early_stopping=True,
-            )
+            ).to(settings.DEVICE)
 
-        translated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-        logger.success(f"✅ Translation: '{translated[:60]}...'")
+            # Translate
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
+                    max_length=settings.NLLB_MAX_LENGTH,
+                    num_beams=4,
+                    early_stopping=True,
+                )
 
-        return {
-            "original_text": text,
-            "translated_text": translated,
-            "source_language": source_lang,
-            "target_language": "en",
-            "was_translated": True,
-        }
+            translated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            logger.success(f"✅ Translation: '{translated[:60]}...'")
+
+            return {
+                "original_text": text,
+                "translated_text": translated,
+                "source_language": source_lang,
+                "target_language": "en",
+                "was_translated": True,
+            }
+        except Exception as e:
+            logger.error(f"❌ Translation to English failed: {e}")
+            return {
+                "original_text": text,
+                "translated_text": text,
+                "source_language": source_lang,
+                "target_language": "en",
+                "was_translated": False,
+            }
 
     def translate_from_english(self, text: str, target_lang: str) -> str:
         """Translate from English to target Indian language (for generated descriptions)"""
@@ -107,17 +117,21 @@ class TranslationService:
         nllb_src = NLLB_LANGUAGE_MAP["en"]
         nllb_tgt = NLLB_LANGUAGE_MAP.get(target_lang, "hin_Deva")
 
-        self.tokenizer.src_lang = nllb_src
-        inputs = self.tokenizer(
-            text, return_tensors="pt", padding=True, truncation=True, max_length=512
-        ).to(settings.DEVICE)
+        try:
+            self.tokenizer.src_lang = nllb_src
+            inputs = self.tokenizer(
+                text, return_tensors="pt", padding=True, truncation=True, max_length=512
+            ).to(settings.DEVICE)
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
-                max_length=512,
-                num_beams=4,
-            )
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
+                    max_length=512,
+                    num_beams=4,
+                )
 
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        except Exception as e:
+            logger.error(f"❌ Translation from English failed: {e}")
+            return text
