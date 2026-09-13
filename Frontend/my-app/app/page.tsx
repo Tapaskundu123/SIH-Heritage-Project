@@ -71,9 +71,9 @@ const FEATURES = [
 
 const STATS = [
   { value: "12+", label: "Indian Languages", icon: Globe },
-  { value: "100%", label: "Local AI (No API Cost)", icon: Shield },
-  { value: "6", label: "AI-Powered Modules", icon: Zap },
-  { value: "RTX 4050", label: "CUDA Accelerated", icon: TrendingUp },
+  { value: "100%", label: "Authentic GI Crafts", icon: Shield },
+  { value: "6", label: "Smart Business Tools", icon: Zap },
+  { value: "0%", label: "Middleman Commission", icon: Award },
 ];
 
 const TESTIMONIALS = [
@@ -204,8 +204,7 @@ export default function LandingPage() {
             KarigarSetu is an AI-powered virtual business manager that helps Indian artisans, weavers, and
             micro-entrepreneurs digitize and sell their crafts online — with{" "}
             <strong style={{ color: "#f5efe6" }}>zero technical knowledge</strong> required.
-            All AI runs{" "}
-            <strong style={{ color: "#f97316" }}>100% locally on your device</strong> — no internet API costs.
+            Connecting authentic Indian heritage directly with national & global buyers with fair, direct pricing.
           </p>
 
           {/* CTA Buttons */}
@@ -244,62 +243,90 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---- Voice Pipeline Showcase ---- */}
+      {/* ---- Customer & Artisan Workflow Pipeline ---- */}
       <section className="py-20 px-6" style={{ background: "var(--bg-dark-2)" }}>
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
-            <span className="badge badge-saffron mb-4">⭐ Most Important Feature</span>
+            <span className="badge badge-saffron mb-4">⭐ How It Works</span>
             <h2 className="text-4xl font-bold mb-4" style={{ fontFamily: "Outfit" }}>
-              Voice → Product in <span className="gradient-text">60 seconds</span>
+              Craft to Market <span className="gradient-text">Workflow</span>
             </h2>
-            <p style={{ color: "#c4a882" }}>
-              Describe your product in any Indian language. Our AI pipeline converts it to a professional listing.
+            <p className="max-w-2xl mx-auto" style={{ color: "#c4a882" }}>
+              A seamless, transparent journey from the artisan&#39;s loom to certified digital listings with fair market pricing.
             </p>
           </div>
 
-          {/* Pipeline steps */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
-            {[
-              { step: "1", icon: "🎙️", label: "Voice Input", sub: "Speak naturally in your language" },
-              { step: "→", icon: "→", label: "", sub: "" },
-              { step: "2", icon: "📝", label: "Whisper ASR", sub: "Local speech recognition" },
-              { step: "→", icon: "→", label: "", sub: "" },
-              { step: "3", icon: "🌐", label: "NLLB Translate", sub: "Multilingual translation" },
-            ].map((item, i) => (
-              item.step === "→" ? (
-                <div key={i} className="hidden md:flex justify-center text-2xl" style={{ color: "#f97316" }}>→</div>
-              ) : (
-                <div key={i} className="pipeline-step flex-col text-center">
-                  <div className="text-3xl mb-2">{item.icon}</div>
-                  <div className="font-semibold text-sm" style={{ fontFamily: "Outfit", color: "#f5efe6" }}>{item.label}</div>
-                  <div className="text-xs mt-1" style={{ color: "#7d6548" }}>{item.sub}</div>
-                </div>
-              )
-            ))}
-          </div>
-
-          <div className="text-center my-4 text-2xl" style={{ color: "#f97316" }}>↓</div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {[
-              { icon: "🧠", label: "Flan-T5 Extraction", sub: "AI extracts name, category, materials, price" },
-              { icon: "✍️", label: "Catalog Generation", sub: "Professional e-commerce description" },
-              { icon: "🛍️", label: "Ready to List!", sub: "Images + description + price — done!" },
-            ].map((item, i) => (
-              <div key={i} className="pipeline-step done flex-col text-center">
-                <div className="text-3xl mb-2">{item.icon}</div>
-                <div className="font-semibold text-sm" style={{ fontFamily: "Outfit", color: "#34d399" }}>{item.label}</div>
-                <div className="text-xs mt-1" style={{ color: "#7d6548" }}>{item.sub}</div>
+          {/* Flow Cards */}
+          <div className="space-y-6">
+            {/* Visual Studio Phase */}
+            <div className="glass-card p-6 border border-amber-500/20">
+              <div className="text-xs uppercase tracking-wider font-bold text-amber-400 mb-4 flex items-center gap-2">
+                <span>📸 Visual Studio Phase</span>
               </div>
-            ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-center">
+                {[
+                  { step: "1", icon: "📸", label: "Upload product Image", sub: "Simple phone camera photo" },
+                  { step: "2", icon: "✂️", label: "Background Removal", sub: "Clean subject separation" },
+                  { step: "3", icon: "✨", label: "Image Enhancer", sub: "Studio lighting & contrast" },
+                  { step: "4", icon: "🖼️", label: "final Product Image", sub: "E-commerce ready asset" },
+                ].map((item, idx) => (
+                  <div key={item.step} className="flex items-center gap-3">
+                    <div className="flex-1 pipeline-step flex-col text-center p-4">
+                      <div className="text-2xl mb-1.5">{item.icon}</div>
+                      <div className="font-bold text-sm text-white" style={{ fontFamily: "Outfit" }}>{item.label}</div>
+                      <div className="text-xs mt-1 text-stone-400">{item.sub}</div>
+                    </div>
+                    {idx < 3 && (
+                      <div className="hidden lg:block text-amber-500 font-bold text-xl shrink-0">→</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Connecting transition indicator */}
+            <div className="flex items-center justify-center gap-2 text-amber-400 font-bold text-sm">
+              <span>↓</span>
+              <span className="text-xs uppercase tracking-widest text-stone-400 font-semibold">
+                Coupled with voice storytelling
+              </span>
+              <span>↓</span>
+            </div>
+
+            {/* Voice & Intelligence Phase */}
+            <div className="glass-card p-6 border border-blue-500/20">
+              <div className="text-xs uppercase tracking-wider font-bold text-blue-400 mb-4 flex items-center gap-2">
+                <span>🎙️ Voice, Catalog & Pricing Phase</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-center">
+                {[
+                  { step: "5", icon: "🎙️", label: "Artisan's voice", sub: "Spoken in regional language" },
+                  { step: "6", icon: "📝", label: "Transcript", sub: "Spoken words to text" },
+                  { step: "7", icon: "🌐", label: "Translate(Hindi/English)", sub: "Bilingual translation" },
+                  { step: "8", icon: "📋", label: "Product Catalog", sub: "Title, specs, materials" },
+                  { step: "9", icon: "💰", label: "Price Prediction", sub: "Fair market benchmark" },
+                ].map((item, idx) => (
+                  <div key={item.step} className="flex items-center gap-2">
+                    <div className="flex-1 pipeline-step flex-col text-center p-4">
+                      <div className="text-2xl mb-1.5">{item.icon}</div>
+                      <div className="font-bold text-xs text-white" style={{ fontFamily: "Outfit" }}>{item.label}</div>
+                      <div className="text-[11px] mt-1 text-stone-400">{item.sub}</div>
+                    </div>
+                    {idx < 4 && (
+                      <div className="hidden lg:block text-blue-400 font-bold text-base shrink-0">→</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="text-center mt-10">
-            <Link href="/voice-cataloger">
+            <Link href="/auth/register">
               <button className="btn-primary px-8 py-4 flex items-center gap-2 mx-auto">
                 <span className="relative z-10 flex items-center gap-2">
                   <Mic size={18} />
-                  Try Voice Cataloger
+                  Experience The Flow
                   <ArrowRight size={16} />
                 </span>
               </button>

@@ -57,15 +57,25 @@ export default function DashboardPage() {
       const res = await axios.get("http://localhost:5000/api/products/dashboard/stats", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.data.success) setStats(res.data.data);
+      if (res.data.success) {
+        setStats(res.data.data);
+      } else {
+        setStats({
+          totalProducts: 0,
+          publishedProducts: 0,
+          lowStockCount: 0,
+          totalStock: 0,
+          totalSold: 0,
+          recentProducts: [],
+        });
+      }
     } catch {
-      // Demo data if backend not connected
       setStats({
-        totalProducts: 12,
-        publishedProducts: 8,
-        lowStockCount: 3,
-        totalStock: 145,
-        totalSold: 67,
+        totalProducts: 0,
+        publishedProducts: 0,
+        lowStockCount: 0,
+        totalStock: 0,
+        totalSold: 0,
         recentProducts: [],
       });
     } finally {

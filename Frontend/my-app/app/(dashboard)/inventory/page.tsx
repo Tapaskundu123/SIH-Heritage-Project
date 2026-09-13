@@ -24,13 +24,6 @@ interface InventoryItem {
   };
 }
 
-const MOCK_INVENTORY: InventoryItem[] = [
-  { _id: "1", currentStock: 12, lowStockThreshold: 5, totalProduced: 50, totalSold: 38, productId: { _id: "p1", name: "Banarasi Silk Saree", category: "textiles", unit: "piece", price: 3500, images: [] } },
-  { _id: "2", currentStock: 3, lowStockThreshold: 5, totalProduced: 20, totalSold: 17, productId: { _id: "p2", name: "Blue Pottery Vase", category: "pottery", unit: "piece", price: 850, images: [] } },
-  { _id: "3", currentStock: 25, lowStockThreshold: 10, totalProduced: 100, totalSold: 75, productId: { _id: "p3", name: "Phulkari Dupatta", category: "textiles", unit: "piece", price: 1200, images: [] } },
-  { _id: "4", currentStock: 2, lowStockThreshold: 5, totalProduced: 15, totalSold: 13, productId: { _id: "p4", name: "Dhokra Figurine", category: "metalwork", unit: "piece", price: 2400, images: [] } },
-];
-
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,13 +37,21 @@ export default function InventoryPage() {
   const fetchInventory = async () => {
     try {
       const token = localStorage.getItem("ks_token");
+      if (!token) {
+        setInventory([]);
+        setLoading(false);
+        return;
+      }
       const res = await axios.get("http://localhost:5000/api/inventory", {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.data.success) setInventory(res.data.data);
-      else setInventory(MOCK_INVENTORY);
+      if (res.data.success && Array.isArray(res.data.data)) {
+        setInventory(res.data.data);
+      } else {
+        setInventory([]);
+      }
     } catch {
-      setInventory(MOCK_INVENTORY);
+      setInventory([]);
     } finally {
       setLoading(false);
     }

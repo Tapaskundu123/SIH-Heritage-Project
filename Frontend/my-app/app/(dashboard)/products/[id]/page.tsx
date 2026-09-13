@@ -399,12 +399,12 @@ export default function ProductDetailPage() {
                 </span>
                 {product.images?.[selectedImageIdx]?.isEnhanced && (
                   <span className="badge badge-saffron text-xs flex items-center gap-1">
-                    <Sparkles size={12} /> AI Enhanced (OpenCV CLAHE)
+                    <Sparkles size={12} /> Image Enhancer
                   </span>
                 )}
                 {product.images?.[selectedImageIdx]?.isBgRemoved && (
                   <span className="badge badge-green text-xs flex items-center gap-1">
-                    <Layers size={12} /> BiRefNet Transparent PNG
+                    <Layers size={12} /> Background Removed
                   </span>
                 )}
               </div>
@@ -588,7 +588,7 @@ export default function ProductDetailPage() {
                 </h4>
               </div>
               <p className="text-xs text-[#c4a882]">
-                Need more studio angles or lifestyle backdrops? Generate transparent PNGs with BiRefNet deep matting and OpenCV CLAHE contrast.
+                Need more studio angles or lifestyle backdrops? Generate clean transparent PNGs and studio-quality enhanced images.
               </p>
             </div>
             <Link
@@ -603,13 +603,13 @@ export default function ProductDetailPage() {
             </Link>
           </div>
 
-          {/* Voice Provenance Card (If Voice Generated via IndicConformer 600M) */}
+          {/* Voice Provenance Card */}
           {product.voiceTranscript && (
             <div className="glass-card p-5 border border-indigo-500/20 bg-indigo-950/10 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400">
                   <Mic size={16} />
-                  <span>LOCAL IndicConformer 600M Voice Cataloging Provenance</span>
+                  <span>Artisan&#39;s Voice Cataloging Story</span>
                 </div>
                 {product.aiConfidenceScore && (
                   <span className="badge badge-indigo text-[10px]">
@@ -623,7 +623,7 @@ export default function ProductDetailPage() {
               <div className="flex items-center gap-2 text-[11px] text-[#7d6548]">
                 <span>Language: <strong className="text-[#c4a882] uppercase">{product.detectedLanguage || "hi"}</strong></span>
                 <span>•</span>
-                <span>Structured via <strong>Qwen 2.5 3B</strong></span>
+                <span>Verified Product Catalog</span>
               </div>
             </div>
           )}

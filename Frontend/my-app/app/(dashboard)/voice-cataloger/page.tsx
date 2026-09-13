@@ -43,12 +43,12 @@ const LANG_NAMES: Record<string, string> = {
 
 const STAGE_LABELS: Record<PipelineStage, string> = {
   idle: "Ready to record",
-  recording: "Recording...",
+  recording: "Recording artisan's voice...",
   processing: "Processing audio...",
-  transcribing: "Whisper ASR — Transcribing...",
-  translating: "NLLB — Translating...",
-  extracting: "Flan-T5 — Extracting product info...",
-  done: "Done!",
+  transcribing: "Generating transcript...",
+  translating: "Translate (Hindi/English)...",
+  extracting: "Product Catalog & Price Prediction...",
+  done: "Product Catalog Ready!",
   error: "Error occurred",
 };
 
@@ -58,10 +58,10 @@ const STAGE_INDEX: Record<PipelineStage, number> = {
 };
 
 const PIPELINE_STEPS = [
-  { icon: "📝", label: "Whisper ASR", desc: "Transcription" },
-  { icon: "🌐", label: "NLLB", desc: "Translation" },
-  { icon: "🧠", label: "Flan-T5", desc: "Extraction" },
-  { icon: "✅", label: "Done!", desc: "Ready to save" },
+  { icon: "📝", label: "Transcript", desc: "Speech to text" },
+  { icon: "🌐", label: "Translate", desc: "Hindi/English" },
+  { icon: "📋", label: "Product Catalog", desc: "Specs & materials" },
+  { icon: "💰", label: "Price Prediction", desc: "Market benchmark" },
 ];
 
 const EXAMPLE_PROMPTS = [
@@ -288,10 +288,10 @@ export default function VoiceCatalogerPage() {
           {stage === "idle" && "Click the mic and describe your product in any Indian language"}
           {stage === "recording" && "Speak clearly — click the square button to stop recording"}
           {stage === "processing" && "Sending audio to AI service..."}
-          {stage === "transcribing" && "Whisper model is converting your speech to text..."}
-          {stage === "translating" && "NLLB-200 translating to English..."}
-          {stage === "extracting" && "Flan-T5 extracting product information..."}
-          {stage === "done" && "✅ Your product catalog has been generated! Review and save below."}
+          {stage === "transcribing" && "Converting artisan's voice into transcript..."}
+          {stage === "translating" && "Translate (Hindi/English) in progress..."}
+          {stage === "extracting" && "Generating Product Catalog & Price Prediction..."}
+          {stage === "done" && "✅ Product Catalog & Price Prediction generated! Review and save below."}
         </p>
 
         {error && (

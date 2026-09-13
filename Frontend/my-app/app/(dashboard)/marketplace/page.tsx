@@ -207,13 +207,22 @@ export default function MarketplacePage() {
             </div>
 
             <div className="flex gap-3">
-              <button className="btn-primary flex-1 py-3 flex items-center justify-center gap-2">
-                <span className="relative z-10 flex items-center gap-2">
-                  <MessageCircle size={16} /> Contact Artisan
-                </span>
-              </button>
-              <button className="btn-ghost py-3 px-4 flex items-center gap-2">
-                <ShoppingBag size={16} /> Request Quote
+              <Link
+                href={`/buyer/checkout?productId=${selectedProduct._id}&name=${encodeURIComponent(selectedProduct.name)}&price=${selectedProduct.price}&artisan=${encodeURIComponent(selectedProduct.artisanId?.name || "Artisan")}`}
+                className="flex-1"
+              >
+                <button className="btn-primary w-full py-3 flex items-center justify-center gap-2">
+                  <span className="relative z-10 flex items-center gap-2">
+                    <ShoppingBag size={16} /> Buy Now / Place Order
+                  </span>
+                </button>
+              </Link>
+              <button
+                type="button"
+                onClick={() => alert(`Direct inquiry sent to artisan ${selectedProduct.artisanId?.name || "Karigar"}. They will contact you via WhatsApp / SMS!`)}
+                className="btn-ghost py-3 px-4 flex items-center gap-2"
+              >
+                <MessageCircle size={16} /> Contact Artisan
               </button>
             </div>
           </div>

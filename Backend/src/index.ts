@@ -10,6 +10,8 @@ import pricingRoutes from './routes/pricing.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import marketplaceRoutes from './routes/marketplace.routes';
 import draftRoutes from './routes/draft.routes';
+import orderRoutes from './routes/order.routes';
+import adminRoutes from './routes/admin.routes';
 
 dotenv.config();
 
@@ -41,6 +43,8 @@ app.get('/', (_req, res) => {
       auth: '/api/auth',
       products: '/api/products',
       marketplace: '/api/marketplace',
+      orders: '/api/orders',
+      admin: '/api/admin',
       inventory: '/api/inventory',
       pricing: '/api/pricing',
       drafts: '/api/drafts',
@@ -67,6 +71,8 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((_req, res) => {

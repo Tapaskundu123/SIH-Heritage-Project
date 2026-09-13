@@ -1,16 +1,27 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import User from '../models/User';
+import User, { UserRole } from '../models/User';
 
-const generateToken = (id: string, email: string): string => {
-  return jwt.sign({ id, email }, process.env.JWT_SECRET || 'secret', {
+const generateToken = (id: string, email: string, role: string): string => {
+  return jwt.sign({ id, email, role }, process.env.JWT_SECRET || 'secret', {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   } as jwt.SignOptions);
 };
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, email, password, phone, region, state, craftType, preferredLanguage } = req.body;
+    const {
+      name,
+      email,
+      password,
+      phone,
+      role = 'artisan',
+      region,
+      state,
+      craftType,
+      preferredLanguage,
+      shippingAddress,
+    } = req.body;
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -18,13 +29,23 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const userRole: UserRole = ['artisan', 'buyer', 'admin'].includes(role) ? role : 'artisan';
+
     const user = await User.create({
-      name, email, password, phone, region, state,
+      name,
+      email,
+      password,
+      phone: phone || '',
+      role: userRole,
+      region: region || '',
+      state: state || '',
       craftType: craftType || 'other',
       preferredLanguage: preferredLanguage || 'hi',
+      shippingAddress: shippingAddress || undefined,
+      isVerified: userRole === 'artisan' ? false : true,
     });
 
-    const token = generateToken(user._id.toString(), user.email);
+    const token = generateToken(user._id.toString(), user.email, user.role);
 
     res.status(201).json({
       success: true,
@@ -53,7 +74,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const token = generateToken(user._id.toString(), user.email);
+    if (!user.role) {
+      user.role = 'artisan';
+      await user.save();
+    }
+
+    const token = generateToken(user._id.toString(), user.email, user.role);
 
     // Remove password from response
     const userObj = user.toJSON();
@@ -76,6 +102,10 @@ export const getProfile = async (req: Request & { userId?: string }, res: Respon
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
+    if (!user.role) {
+      user.role = 'artisan';
+      await user.save();
+    }
     res.json({ success: true, data: user });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch profile' });
@@ -84,7 +114,17 @@ export const getProfile = async (req: Request & { userId?: string }, res: Respon
 
 export const updateProfile = async (req: Request & { userId?: string }, res: Response): Promise<void> => {
   try {
-    const allowedFields = ['name', 'phone', 'region', 'state', 'craftType', 'preferredLanguage', 'bio', 'profileImage'];
+    const allowedFields = [
+      'name',
+      'phone',
+      'region',
+      'state',
+      'craftType',
+      'preferredLanguage',
+      'bio',
+      'profileImage',
+      'shippingAddress',
+    ];
     const updates: Record<string, unknown> = {};
 
     for (const field of allowedFields) {

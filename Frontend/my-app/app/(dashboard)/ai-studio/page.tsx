@@ -40,22 +40,22 @@ interface PipelineProgress {
 const PIPELINE_STAGES: PipelineStage[] = [
   {
     id: "bg",
-    label: "BiRefNet",
-    sublabel: "Background removal",
+    label: "Background Removal",
+    sublabel: "Clean subject separation",
     icon: <Scissors size={14} />,
     color: "#f97316",
   },
   {
     id: "enhance",
-    label: "OpenCV CLAHE",
-    sublabel: "Contrast & sharpening",
+    label: "Image Enhancer",
+    sublabel: "Contrast & lighting",
     icon: <Zap size={14} />,
     color: "#818cf8",
   },
   {
     id: "ecom",
-    label: "Studio Render",
-    sublabel: "1024×1024 canvas",
+    label: "final Product Image",
+    sublabel: "Studio ready canvas",
     icon: <ShoppingBag size={14} />,
     color: "#10b981",
   },
@@ -64,27 +64,27 @@ const PIPELINE_STAGES: PipelineStage[] = [
 const OPERATIONS: { id: Operation; label: string; desc: string; icon: React.ReactNode; accent: string; steps: string[] }[] = [
   {
     id: "remove_bg",
-    label: "Remove Background",
-    desc: "Transparent PNG — uses BiRefNet deep matting",
+    label: "Background Removal",
+    desc: "Clean transparent PNG with sharp subject isolation",
     icon: <Scissors size={18} />,
     accent: "#f97316",
-    steps: ["BiRefNet segmentation", "Edge refinement", "Alpha compositing"],
+    steps: ["Subject separation", "Edge refinement", "Clean transparent PNG"],
   },
   {
     id: "enhance",
-    label: "Enhance Quality",
-    desc: "CLAHE + denoising + sharpening with OpenCV",
+    label: "Image Enhancer",
+    desc: "Adaptive lighting, true-color vibrancy, and detail sharpening",
     icon: <Sparkles size={18} />,
     accent: "#818cf8",
-    steps: ["Adaptive brightness", "CLAHE local contrast", "NlMeans denoising", "Unsharp mask"],
+    steps: ["Adaptive lighting", "Color vibrancy", "Noise reduction", "Detail sharpening"],
   },
   {
     id: "all",
-    label: "Full Pipeline",
-    desc: "BG remove → enhance → 1024×1024 e-commerce image",
+    label: "Full Image Pipeline",
+    desc: "Upload product Image → Background Removal → Image Enhancer → final Product Image",
     icon: <Layers size={18} />,
     accent: "#10b981",
-    steps: ["BiRefNet BG removal", "OpenCV enhancement", "E-commerce canvas"],
+    steps: ["Upload product Image", "Background Removal", "Image Enhancer", "final Product Image"],
   },
 ];
 
@@ -317,14 +317,14 @@ export default function AIStudioPage() {
       <div>
         <div className="flex items-center gap-2 mb-2">
           <span className="badge badge-indigo">AI Powered</span>
-          <span className="badge badge-saffron">BiRefNet + OpenCV</span>
-          <span className="badge badge-green">CUDA Accelerated</span>
+          <span className="badge badge-saffron">Background Removal + Image Enhancer</span>
+          <span className="badge badge-green">Studio Quality</span>
         </div>
         <h1 className="text-4xl font-black mb-2 gradient-text" style={{ fontFamily: "Outfit" }}>
           AI Product Studio
         </h1>
         <p style={{ color: "var(--text-secondary)", fontSize: 15 }}>
-          Transform phone photos into professional e-commerce images using BiRefNet deep-matting and OpenCV enhancement.
+          Transform phone photos into professional e-commerce images with automatic background removal and studio enhancement.
         </p>
       </div>
 
@@ -549,7 +549,7 @@ export default function AIStudioPage() {
             <div className="glass-card" style={{ padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <Loader2 size={40} className="animate-spin" color="#f97316" />
               <p style={{ fontFamily: "Outfit", fontWeight: 600, color: "var(--text-primary)" }}>
-                {operation === "remove_bg" ? "BiRefNet removing background..." : "OpenCV enhancing image..."}
+                {operation === "remove_bg" ? "Removing background..." : "Enhancing image..."}
               </p>
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>This may take 15–60 seconds on first run</p>
             </div>

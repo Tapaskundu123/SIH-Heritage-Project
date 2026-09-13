@@ -49,69 +49,6 @@ interface Product {
   createdAt: string;
 }
 
-const MOCK: Product[] = [
-  {
-    _id: "1",
-    name: "Banarasi Pure Katan Silk Handloom Saree",
-    nameHindi: "बनारसी शुद्ध कातान सिल्क हथकरघा साड़ी",
-    category: "textiles",
-    price: 3500,
-    stock: 12,
-    isPublished: true,
-    isAIGenerated: true,
-    region: "Varanasi, UP",
-    craftTechnique: "Kadhwa Handloom Weave",
-    images: [
-      {
-        url: "https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=600&q=80",
-        isEnhanced: true,
-      },
-    ],
-    tags: ["silk", "banarasi", "zari"],
-    createdAt: "2024-09-01",
-  },
-  {
-    _id: "2",
-    name: "Jaipur Traditional Blue Pottery Floral Vase",
-    nameHindi: "जयपुर पारंपरिक ब्लू पॉटरी फूलदान",
-    category: "pottery",
-    price: 850,
-    stock: 3,
-    isPublished: false,
-    isAIGenerated: false,
-    region: "Jaipur, Rajasthan",
-    craftTechnique: "Clay-free quartz dough",
-    images: [
-      {
-        url: "https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?auto=format&fit=crop&w=600&q=80",
-        isEnhanced: true,
-      },
-    ],
-    tags: ["pottery", "blue", "ceramic"],
-    createdAt: "2024-09-02",
-  },
-  {
-    _id: "3",
-    name: "Handmade Mithila Madhubani Kohbar Painting",
-    nameHindi: "हस्तनिर्मित मिथिला मधुबनी कोहबर चित्रकला",
-    category: "paintings",
-    price: 1800,
-    stock: 6,
-    isPublished: true,
-    isAIGenerated: true,
-    region: "Madhubani, Bihar",
-    craftTechnique: "Kachni & Bharni fine line art",
-    images: [
-      {
-        url: "https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=600&q=80",
-        isEnhanced: true,
-      },
-    ],
-    tags: ["madhubani", "mithila", "folkart"],
-    createdAt: "2024-09-03",
-  },
-];
-
 const CATEGORIES = ["all", "textiles", "pottery", "paintings", "woodwork", "jewelry", "metalwork"];
 
 export default function ProductsPage() {
@@ -125,16 +62,21 @@ export default function ProductsPage() {
     const fetchProducts = async () => {
       try {
         const token = localStorage.getItem("ks_token");
+        if (!token) {
+          setProducts([]);
+          setLoading(false);
+          return;
+        }
         const res = await axios.get("http://localhost:5000/api/products", {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.data.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+        if (res.data.success && Array.isArray(res.data.data)) {
           setProducts(res.data.data);
         } else {
-          setProducts(MOCK);
+          setProducts([]);
         }
       } catch {
-        setProducts(MOCK);
+        setProducts([]);
       } finally {
         setLoading(false);
       }
@@ -230,7 +172,7 @@ export default function ProductsPage() {
           <div className="text-2xl font-black text-[#818cf8] mt-0.5" style={{ fontFamily: "Outfit" }}>
             {totalVoice}
           </div>
-          <div className="text-[11px] text-[#c4a882] mt-1">IndicConformer 600M</div>
+          <div className="text-[11px] text-[#c4a882] mt-1">Artisan Voice Story</div>
         </div>
 
         <div className="glass-card p-4">
@@ -238,7 +180,7 @@ export default function ProductsPage() {
           <div className="text-2xl font-black text-[#f97316] mt-0.5" style={{ fontFamily: "Outfit" }}>
             {products.length}
           </div>
-          <div className="text-[11px] text-[#c4a882] mt-1">BiRefNet + CLAHE</div>
+          <div className="text-[11px] text-[#c4a882] mt-1">Enhanced Studio Images</div>
         </div>
       </div>
 
@@ -303,22 +245,41 @@ export default function ProductsPage() {
           <Loader2 size={36} className="animate-spin mx-auto text-[#f97316]" />
           <p className="text-[#c4a882]">Loading products and AI Studio connections...</p>
         </div>
+      ) : products.length === 0 ? (
+        <div className="glass-card p-16 text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto text-amber-400">
+            <Package size={36} />
+          </div>
+          <h3 className="text-xl font-bold text-white" style={{ fontFamily: "Outfit" }}>
+            No Handcrafted Products Uploaded Yet
+          </h3>
+          <p className="text-xs text-[#c4a882] max-w-md mx-auto">
+            You have not added or published any craft products to your artisan store. Create your first product listing using the AI Voice Cataloger or add details manually.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <Link href="/voice-cataloger">
+              <button className="btn-primary px-5 py-2.5 flex items-center gap-2 text-sm font-semibold">
+                <span className="relative z-10 flex items-center gap-2">
+                  <Mic size={16} /> Catalog with Voice 🎙️
+                </span>
+              </button>
+            </Link>
+            <Link href="/products/new">
+              <button className="btn-ghost px-5 py-2.5 text-sm font-semibold text-[#c4a882] hover:text-white border border-white/10">
+                <Plus size={16} className="inline mr-1" /> Add Manually
+              </button>
+            </Link>
+          </div>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="glass-card p-16 text-center space-y-4">
           <Package size={52} className="mx-auto text-[#7d6548]" />
           <h3 className="text-xl font-bold text-[#c4a882]" style={{ fontFamily: "Outfit" }}>
-            No products match your criteria
+            No products match your search or filter
           </h3>
           <p className="text-xs text-[#7d6548] max-w-sm mx-auto">
-            Try adjusting your search terms or create a new product using AI Voice Cataloger.
+            Try adjusting your search query or selecting a different craft category.
           </p>
-          <Link href="/voice-cataloger">
-            <button className="btn-primary px-6 py-2.5 mt-2 flex items-center gap-2 mx-auto text-sm font-semibold">
-              <span className="relative z-10 flex items-center gap-2">
-                <Mic size={16} /> Catalog with Voice
-              </span>
-            </button>
-          </Link>
         </div>
       ) : viewMode === "grid" ? (
         /* ================= GRID / CARDS VIEW ================= */
@@ -438,7 +399,7 @@ export default function ProductsPage() {
                     <button
                       id={`card-studio-btn-${product._id}`}
                       className="w-full btn-primary py-2 px-2 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-md shadow-orange-950/20"
-                      title="Add & enhance images using AI Image Studio (BiRefNet + OpenCV)"
+                      title="Add & enhance images using Image Studio (Background Removal + Image Enhancer)"
                     >
                       <span className="relative z-10 flex items-center gap-1.5">
                         <Sparkles size={13} className="text-amber-300" />
