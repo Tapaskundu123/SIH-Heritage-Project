@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import axios from "axios";
 import {
   Mic, MicOff, Square, Play, Pause, ChevronRight,
   Check, RefreshCw, Save, AlertCircle, Sparkles, Globe,
-  FileText, Tag, Package, DollarSign, Loader2
+  FileText, Tag, Package, DollarSign, Loader2, ArrowRight,
+  TrendingUp, ImageIcon
 } from "lucide-react";
+import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
+import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banner";
 
 type PipelineStage = "idle" | "recording" | "processing" | "transcribing" | "translating" | "extracting" | "done" | "error";
 
@@ -66,11 +70,12 @@ const PIPELINE_STEPS = [
 
 const EXAMPLE_PROMPTS = [
   { lang: "Hindi", text: "मेरे पास बनारसी रेशम की साड़ी है, लाल और सुनहरे रंग में, हाथ से बुनी हुई, कीमत 3500 रुपये।", flag: "🇮🇳" },
-  { lang: "Tamil", text: "கஞ்சிவரம் பட்டு புடவை, தங்க நூல் வேலை, பாரம்பரிய முறையில் நெய்யப்பட்டது.", flag: "🇮🇳" },
+  { lang: "Tamil", text: "காஞ்சிவரம் பட்டு புடவை, தங்க நூல் வேலை, பாரம்பரிய முறையில் நெய்யப்பட்டது.", flag: "🇮🇳" },
   { lang: "Bengali", text: "মসলিন কাপড়ের শাড়ি, ঢাকাই জামদানি, হাতে বোনা, সূক্ষ্ম নকশা।", flag: "🇮🇳" },
 ];
 
 export default function VoiceCatalogerPage() {
+  const router = useRouter();
   const [stage, setStage] = useState<PipelineStage>("idle");
   const [result, setResult] = useState<PipelineResult | null>(null);
   const [error, setError] = useState("");
@@ -78,10 +83,38 @@ export default function VoiceCatalogerPage() {
   const [editedProduct, setEditedProduct] = useState<Record<string, unknown> | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Onboarding state
+  const [isOnboardingMode, setIsOnboardingMode] = useState(false);
+  const [onboardingContinueCountdown, setOnboardingContinueCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pipelineHook = useOnboardingPipeline();
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("onboarding") === "1" || pipelineHook.isOnboarding) setIsOnboardingMode(true);
+    }
+  }, [pipelineHook.isOnboarding]);
+
+  // Start countdown to price prediction page
+  const startOnboardingCountdown = useCallback(() => {
+    setOnboardingContinueCountdown(4);
+    countdownRef.current = setInterval(() => {
+      setOnboardingContinueCountdown((c) => {
+        if (c === null || c <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          router.push("/onboarding/price-prediction");
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }, [router]);
 
   const startRecording = useCallback(async () => {
     setError("");
@@ -159,7 +192,7 @@ export default function VoiceCatalogerPage() {
       if (res.data.success) {
         const pipeline = res.data.data.pipeline;
         setResult(pipeline);
-        setEditedProduct({
+        const specs = {
           name: pipeline.extraction?.name || "",
           category: pipeline.extraction?.category || "other",
           description: pipeline.extraction?.description_en || "",
@@ -167,8 +200,26 @@ export default function VoiceCatalogerPage() {
           tags: pipeline.extraction?.tags?.join(", ") || "",
           price: pipeline.extraction?.price_hint || "",
           craftTechnique: pipeline.extraction?.craft_technique || "",
-        });
+        };
+        setEditedProduct(specs);
         setStage("done");
+
+        // ── Onboarding: save specs to pipeline state and start countdown ──
+        if (isOnboardingMode) {
+          pipelineHook.completeVoiceStep({
+            name: String(specs.name),
+            category: String(specs.category),
+            description: String(specs.description),
+            materials: String(specs.materials),
+            tags: String(specs.tags),
+            craftTechnique: String(specs.craftTechnique),
+            price_hint: Number(specs.price) || null,
+            transcript: pipeline.asr?.transcript,
+            detectedLanguage: pipeline.asr?.detected_language,
+            confidence: pipeline.extraction?.confidence,
+          });
+          startOnboardingCountdown();
+        }
       } else {
         throw new Error("Pipeline failed");
       }
@@ -203,15 +254,67 @@ export default function VoiceCatalogerPage() {
   const currentStageIdx = STAGE_INDEX[stage];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6" style={{ paddingBottom: isOnboardingMode ? 100 : 0 }}>
+      {/* Onboarding Banner */}
+      {isOnboardingMode && <OnboardingPipelineBanner />}
+
       {/* Header */}
       <div>
+        {isOnboardingMode && (
+          <div
+            style={{
+              padding: "14px 20px",
+              borderRadius: 14,
+              background: "linear-gradient(135deg, rgba(129,140,248,0.12), rgba(99,102,241,0.06))",
+              border: "1px solid rgba(129,140,248,0.35)",
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+                background: "rgba(129,140,248,0.2)",
+                border: "1px solid rgba(129,140,248,0.4)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#818cf8", fontSize: 20,
+              }}
+            >
+              🎙️
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontFamily: "Outfit", fontWeight: 700, color: "#818cf8", marginBottom: 3 }}>
+                Step 2 of 4 — Voice Cataloger
+              </div>
+              <div style={{ fontSize: 12, color: "#c4a882" }}>
+                Speak about your product in your language. AI will extract specifications, materials, and details automatically.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {["image", "voice", "pricing", "catalog"].map((s, i) => (
+                <div
+                  key={s}
+                  style={{
+                    width: i === 1 ? 24 : 8,
+                    height: 8,
+                    borderRadius: 4,
+                    background: i <= 1 ? (i === 1 ? "#818cf8" : "#10b981") : "rgba(255,255,255,0.1)",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 mb-1">
           <span className="badge badge-saffron">⭐ Most Important</span>
           <span className="badge badge-indigo">AI Pipeline</span>
+          {isOnboardingMode && <span className="badge badge-green">Step 2/4</span>}
         </div>
         <h1 className="text-3xl font-black" style={{ fontFamily: "Outfit" }}>
-          🎙️ Multilingual Voice Cataloger
+          🎙️  Multilingual Voice Cataloger
         </h1>
         <p style={{ color: "#c4a882" }}>
           Speak in your language. AI converts it to a professional product listing automatically.
@@ -475,21 +578,91 @@ export default function VoiceCatalogerPage() {
             </div>
           )}
 
-          {/* Action buttons */}
-          <div className="flex gap-3 mt-6">
-            <button onClick={() => { setStage("idle"); setResult(null); setEditedProduct(null); setSaved(false); }}
-              className="btn-ghost flex items-center gap-2 px-4 py-2.5">
-              <RefreshCw size={15} /> Record Again
-            </button>
-            <button onClick={handleSaveProduct} disabled={saved}
-              className="btn-primary flex items-center gap-2 px-6 py-2.5">
-              <span className="relative z-10 flex items-center gap-2">
-                {saved ? <><Check size={15} /> Saved!</> : <><Save size={15} /> Save Product</>}
-              </span>
-            </button>
-          </div>
+          {/* ── ONBOARDING: Continue to Price Prediction ── */}
+          {isOnboardingMode && (
+            <div
+              style={{
+                marginTop: 20,
+                padding: "18px 20px",
+                borderRadius: 14,
+                background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.06))",
+                border: "1px solid rgba(16,185,129,0.4)",
+              }}
+            >
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontFamily: "Outfit", fontWeight: 700, color: "#10b981", marginBottom: 4 }}>
+                  ✅ Voice Pipeline Complete!
+                </div>
+                <div style={{ fontSize: 12, color: "#c4a882" }}>
+                  Product specifications extracted. Now let AI predict the optimal price using your product image + specs.
+                </div>
+              </div>
 
-          {saved && (
+              {onboardingContinueCountdown !== null && (
+                <div style={{ textAlign: "center", marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: "#7d6548", marginBottom: 4 }}>
+                    Auto-navigating to AI Price Prediction in...
+                  </div>
+                  <div style={{ fontSize: 28, fontFamily: "Outfit", fontWeight: 900, color: "#f97316" }}>
+                    {onboardingContinueCountdown}s
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => {
+                  if (countdownRef.current) clearInterval(countdownRef.current);
+                  // Save any edits to the pipeline state before navigating
+                  pipelineHook.completeVoiceStep({
+                    name: String(editedProduct?.name || ""),
+                    category: String(editedProduct?.category || ""),
+                    description: String(editedProduct?.description || ""),
+                    materials: String(editedProduct?.materials || ""),
+                    tags: String(editedProduct?.tags || ""),
+                    craftTechnique: String(editedProduct?.craftTechnique || ""),
+                    price_hint: Number(editedProduct?.price) || null,
+                    transcript: result?.asr?.transcript,
+                    detectedLanguage: result?.asr?.detected_language,
+                  });
+                  router.push("/onboarding/price-prediction");
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "12px 20px", borderRadius: 12,
+                  background: "linear-gradient(135deg, #f97316, #ea580c)",
+                  border: "none", cursor: "pointer", color: "white",
+                  fontSize: 14, fontFamily: "Outfit", fontWeight: 700,
+                  boxShadow: "0 4px 20px rgba(249,115,22,0.4)",
+                }}
+              >
+                <TrendingUp size={16} />
+                Continue to AI Price Prediction
+                <ArrowRight size={16} />
+              </button>
+              <div style={{ marginTop: 8, textAlign: "center", fontSize: 11, color: "#7d6548" }}>
+                Step 3 of 4: SigLIP + TabPFN multimodal price prediction →
+              </div>
+            </div>
+          )}
+
+          {/* Standard action buttons (non-onboarding) */}
+          {!isOnboardingMode && (
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => { setStage("idle"); setResult(null); setEditedProduct(null); setSaved(false); }}
+                className="btn-ghost flex items-center gap-2 px-4 py-2.5">
+                <RefreshCw size={15} /> Record Again
+              </button>
+              <button onClick={handleSaveProduct} disabled={saved}
+                className="btn-primary flex items-center gap-2 px-6 py-2.5">
+                <span className="relative z-10 flex items-center gap-2">
+                  {saved ? <><Check size={15} /> Saved!</> : <><Save size={15} /> Save Product</>}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {saved && !isOnboardingMode && (
             <div className="mt-3 flex items-center gap-2 text-sm" style={{ color: "#34d399" }}>
               <Check size={14} /> Product saved! <a href="/products" style={{ color: "#f97316", textDecoration: "underline" }}>View Products →</a>
             </div>
@@ -521,3 +694,4 @@ export default function VoiceCatalogerPage() {
     </div>
   );
 }
+

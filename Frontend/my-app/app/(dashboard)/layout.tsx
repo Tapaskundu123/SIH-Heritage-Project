@@ -6,7 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import {
   LayoutDashboard, Mic, Image as ImageIcon, Package, BarChart3,
   ShoppingBag, Boxes, LogOut, Menu, X, Bell, ChevronRight,
-  ClipboardList, IndianRupee, ShieldCheck, Users, Truck
+  ClipboardList, IndianRupee, ShieldCheck, Users, Truck, TrendingUp
 } from "lucide-react";
 import axios from "axios";
 
@@ -19,6 +19,14 @@ interface UserProfile {
   region?: string;
   state?: string;
   isVerified?: boolean;
+}
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  badge?: string;
+  section?: string;
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -97,16 +105,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       ];
     }
 
-    // Default: Artisan / Karigar
+    // Default: Artisan / Karigar — exact sequential order of the creation pipeline
     return [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { href: "/voice-cataloger", label: "Voice Cataloger", icon: Mic, badge: "⭐" },
-      { href: "/ai-studio", label: "AI Photo Studio", icon: ImageIcon },
-      { href: "/products", label: "My Products", icon: Package },
+      { section: "AI Listing Pipeline", href: "/ai-studio", label: "AI Photo Studio", icon: ImageIcon, badge: "Step 1" },
+      { href: "/voice-cataloger", label: "Voice Cataloger", icon: Mic, badge: "Step 2" },
+      { href: "/onboarding/price-prediction", label: "AI Price Prediction", icon: TrendingUp, badge: "Step 3" },
+      { href: "/products", label: "Product Catalog", icon: Package, badge: "Step 4" },
+      { section: "Store & Operations", href: "/pricing", label: "Pricing Calculator", icon: BarChart3 },
+      { href: "/inventory", label: "Inventory", icon: Boxes },
       { href: "/artisan/orders", label: "Manage Orders", icon: ClipboardList, badge: "Orders" },
       { href: "/artisan/earnings", label: "Earnings & Sales", icon: IndianRupee },
-      { href: "/pricing", label: "Pricing Assistant", icon: BarChart3 },
-      { href: "/inventory", label: "Inventory", icon: Boxes },
       { href: "/marketplace", label: "B2B Marketplace", icon: ShoppingBag },
     ];
   };
@@ -212,18 +221,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {navItems.map((item) => {
           const isActive = pathname === item.href || (pathname.startsWith(item.href + "/") && item.href !== "/");
           return (
-            <Link key={item.href} href={item.href} onClick={() => setSidebarOpen(false)}>
-              <div className={`sidebar-item ${isActive ? "active" : ""}`}>
-                <item.icon size={18} />
-                <span className="flex-1 text-sm">{item.label}</span>
-                {item.badge && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                    {item.badge}
-                  </span>
-                )}
-                {isActive && <ChevronRight size={14} style={{ color: "#f97316" }} />}
-              </div>
-            </Link>
+            <div key={item.href}>
+              {item.section && (
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-stone-500 px-3 pt-3 pb-1 mt-1 border-t border-white/5">
+                  {item.section}
+                </div>
+              )}
+              <Link href={item.href} onClick={() => setSidebarOpen(false)}>
+                <div className={`sidebar-item ${isActive ? "active" : ""}`}>
+                  <item.icon size={18} />
+                  <span className="flex-1 text-sm">{item.label}</span>
+                  {item.badge && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                      {item.badge}
+                    </span>
+                  )}
+                  {isActive && <ChevronRight size={14} style={{ color: "#f97316" }} />}
+                </div>
+              </Link>
+            </div>
           );
         })}
       </nav>

@@ -24,7 +24,11 @@ import {
   ShieldCheck,
   Tag,
   ExternalLink,
+  PartyPopper,
+  X,
 } from "lucide-react";
+import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
+import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banner";
 
 interface ProductImage {
   url: string;
@@ -57,6 +61,23 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("grid");
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  const pipelineHook = useOnboardingPipeline();
+
+  // Detect onboarding completion from URL
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("onboarding") === "complete" || pipelineHook.step === "complete") {
+        setShowCelebration(true);
+        // Clear pipeline state after showing celebration
+        setTimeout(() => {
+          pipelineHook.resetPipeline();
+        }, 8000);
+      }
+    }
+  }, [pipelineHook.hydrated]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -112,7 +133,79 @@ export default function ProductsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-16 page-enter">
-      {/* Header Bar */}
+      {/* Onboarding pipeline progress banner */}
+      <OnboardingPipelineBanner />
+
+      {/* 🎉 Onboarding Celebration Banner */}
+      {showCelebration && (
+        <div
+          style={{
+            padding: "20px 24px",
+            borderRadius: 18,
+            background: "linear-gradient(135deg, rgba(249,115,22,0.16), rgba(16,185,129,0.08))",
+            border: "1px solid rgba(249,115,22,0.5)",
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          {/* Decorative blobs */}
+          <div style={{ position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "radial-gradient(circle, rgba(249,115,22,0.2), transparent 70%)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", bottom: -20, left: 80, width: 100, height: 100, borderRadius: "50%", background: "radial-gradient(circle, rgba(16,185,129,0.15), transparent 70%)", pointerEvents: "none" }} />
+
+          <button
+            onClick={() => setShowCelebration(false)}
+            style={{ position: "absolute", top: 12, right: 14, background: "none", border: "none", cursor: "pointer", color: "#7d6548", padding: 2 }}
+          >
+            <X size={16} />
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div
+              style={{
+                width: 52, height: 52, borderRadius: 16, flexShrink: 0,
+                background: "linear-gradient(135deg, #f97316, #ea580c)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 26,
+                boxShadow: "0 4px 20px rgba(249,115,22,0.4)",
+              }}
+            >
+              🎉
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 17, fontFamily: "Outfit", fontWeight: 800, color: "#f5efe6", marginBottom: 4 }}>
+                Welcome to KarigarSetu! Your First Product is Live! 🚀
+              </div>
+              <div style={{ fontSize: 13, color: "#c4a882" }}>
+                You've completed the full onboarding pipeline — AI Studio → Voice Cataloger → Price Prediction → Catalog.
+                Your product has been created with AI-enhanced images and an optimal predicted price.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            {[
+              { emoji: "✅", label: "AI Studio — Image processed" },
+              { emoji: "✅", label: "Voice Cataloger — Specs extracted" },
+              { emoji: "✅", label: "SigLIP + TabPFN — Price predicted" },
+              { emoji: "✅", label: "Product Catalog — Live!" },
+            ].map((item) => (
+              <span
+                key={item.label}
+                style={{
+                  fontSize: 11, padding: "4px 10px", borderRadius: 20,
+                  background: "rgba(16,185,129,0.12)",
+                  border: "1px solid rgba(16,185,129,0.3)",
+                  color: "#34d399",
+                  fontFamily: "Outfit", fontWeight: 600,
+                }}
+              >
+                {item.emoji} {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">

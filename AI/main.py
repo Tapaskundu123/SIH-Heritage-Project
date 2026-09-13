@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from config import settings
-from routers import voice, image, catalog, pricing
+from routers import voice, image, catalog, pricing, siglip_pricing
 
 # Configure logger with UTF-8 support on Windows
 if sys.platform == "win32":
@@ -119,6 +119,7 @@ app.include_router(voice.router, prefix="/ai/voice", tags=["Voice"])
 app.include_router(image.router, prefix="/ai/image", tags=["Image"])
 app.include_router(catalog.router, prefix="/ai/catalog", tags=["Catalog"])
 app.include_router(pricing.router, prefix="/ai/pricing", tags=["Pricing"])
+app.include_router(siglip_pricing.router, prefix="/ai/pricing", tags=["SigLIP Pricing"])
 
 
 @app.get("/health")

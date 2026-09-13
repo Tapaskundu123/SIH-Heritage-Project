@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, AlertCircle, ArrowRight, Lock, Mail } from "lucide-react";
 import axios from "axios";
+import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { startOnboarding } = useOnboardingPipeline();
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,7 +21,9 @@ export default function LoginPage() {
     } else if (role === "buyer") {
       router.push("/marketplace");
     } else {
-      router.push("/dashboard");
+      // Artisans: start the guided onboarding pipeline and redirect to upload image page (AI Studio)
+      startOnboarding();
+      router.push("/ai-studio?onboarding=1");
     }
   };
 

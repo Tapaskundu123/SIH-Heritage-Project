@@ -2,14 +2,17 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import {
   Upload, X, Scissors, Sparkles, Download, RefreshCw,
   ImageIcon, Loader2, Check, AlertCircle, Wand2, Zap,
   ChevronRight, Info, ShoppingBag, Layers, Eye, EyeOff,
-  ArrowRight, ShieldCheck, CheckCircle2
+  ArrowRight, ShieldCheck, CheckCircle2, Mic, TrendingUp
 } from "lucide-react";
+import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
+import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banner";
 
 // AI service runs on port 8000 directly
 const AI_BASE = process.env.NEXT_PUBLIC_AI_URL || "http://localhost:8000";
@@ -89,6 +92,7 @@ const OPERATIONS: { id: Operation; label: string; desc: string; icon: React.Reac
 ];
 
 export default function AIStudioPage() {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [operation, setOperation] = useState<Operation>("all");
@@ -106,15 +110,38 @@ export default function AIStudioPage() {
   const [attachingToProduct, setAttachingToProduct] = useState(false);
   const [attachSuccess, setAttachSuccess] = useState(false);
 
+  // ── Onboarding pipeline integration ──────────────────────────────────────
+  const [isOnboardingMode, setIsOnboardingMode] = useState(false);
+  const [onboardingContinueCountdown, setOnboardingContinueCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pipelineHook = useOnboardingPipeline();
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const pid = params.get("productId");
       const pname = params.get("productName");
+      const onboarding = params.get("onboarding");
       if (pid) setTargetProductId(pid);
       if (pname) setTargetProductName(pname);
+      if (onboarding === "1" || pipelineHook.isOnboarding) setIsOnboardingMode(true);
     }
-  }, []);
+  }, [pipelineHook.isOnboarding]);
+
+  // Auto-navigate countdown to Voice Cataloger after pipeline done in onboarding mode
+  const startOnboardingCountdown = useCallback(() => {
+    setOnboardingContinueCountdown(4);
+    countdownRef.current = setInterval(() => {
+      setOnboardingContinueCountdown((c) => {
+        if (c === null || c <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          router.push("/voice-cataloger?onboarding=1");
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }, [router]);
 
   const handleAttachToProduct = async () => {
     if (!targetProductId || !images) return;
@@ -265,14 +292,27 @@ export default function AIStudioPage() {
       const enhancedUrl = `data:image/jpeg;base64,${data.enhanced}`;
       const ecomUrl = `data:image/jpeg;base64,${data.ecommerce_ready}`;
 
-      setImages({
+      const finalImages: ProcessedImages = {
         original: preview!,
         bgRemoved: bgRemovedUrl,
         enhanced: enhancedUrl,
         ecommerce: ecomUrl,
-      });
+      };
+
+      setImages(finalImages);
       setActiveView("ecommerce");
       setPipeline({ stage: 0, done: [1, 2, 3] });
+
+      // ── Onboarding: save images to pipeline state and start countdown ──
+      if (isOnboardingMode) {
+        pipelineHook.completeImageStep({
+          original: preview!,
+          bgRemoved: bgRemovedUrl,
+          enhanced: enhancedUrl,
+          ecommerce: ecomUrl,
+        });
+        startOnboardingCountdown();
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Pipeline failed — is the AI service running on port 8000?");
       setPipeline({ stage: 0, done: [] });
@@ -311,8 +351,68 @@ export default function AIStudioPage() {
 
   const displayImg = peekOriginal && images?.original ? images.original : currentImg;
 
+  const isPipelineDone = images?.ecommerce !== undefined || (pipeline.done.length === 3);
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 page-enter" style={{ padding: "0 0 40px" }}>
+    <div className="max-w-6xl mx-auto space-y-6 page-enter" style={{ padding: isOnboardingMode ? "0 0 100px" : "0 0 40px" }}>
+      {/* Onboarding Banner */}
+      {isOnboardingMode && <OnboardingPipelineBanner />}
+
+      {/* ── Onboarding Welcome Banner ── */}
+      {isOnboardingMode && (
+        <div
+          style={{
+            padding: "16px 20px",
+            borderRadius: 16,
+            background: "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(234,88,12,0.06))",
+            border: "1px solid rgba(249,115,22,0.35)",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: "rgba(249,115,22,0.2)",
+              border: "1px solid rgba(249,115,22,0.4)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              color: "#f97316",
+            }}
+          >
+            <Sparkles size={22} className="animate-spin" style={{ animationDuration: "6s" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontFamily: "Outfit", fontWeight: 700, color: "#f97316", marginBottom: 3 }}>
+              🎉 Welcome! Step 1 of 4 — AI Photo Studio
+            </div>
+            <div style={{ fontSize: 12, color: "#c4a882" }}>
+              Upload your product photo. Our AI will remove the background, enhance it, and create a professional e-commerce image automatically.
+            </div>
+          </div>
+          {/* Step indicator */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {["image", "voice", "pricing", "catalog"].map((s, i) => (
+              <div
+                key={s}
+                style={{
+                  width: i === 0 ? 24 : 8,
+                  height: 8,
+                  borderRadius: 4,
+                  background: i === 0 ? "#f97316" : "rgba(255,255,255,0.1)",
+                  transition: "all 0.3s",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ---- Page Header ---- */}
       <div>
         <div className="flex items-center gap-2 mb-2">
@@ -390,7 +490,7 @@ export default function AIStudioPage() {
                   background: "rgba(0,0,0,0.6)", borderRadius: 8, padding: "3px 10px",
                   fontSize: 11, color: "#c4a882", fontFamily: "Outfit",
                 }}>
-                  {file?.name} · {(file!.size / 1024).toFixed(0)}KB
+                  {file?.name} Â· {(file!.size / 1024).toFixed(0)}KB
                 </div>
               </div>
             ) : (
@@ -404,10 +504,10 @@ export default function AIStudioPage() {
                   <Upload size={28} color={isDragActive ? "#f97316" : "#7d6548"} />
                 </div>
                 <p style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 15, color: isDragActive ? "#f97316" : "var(--text-primary)", marginBottom: 6 }}>
-                  {isDragActive ? "Drop to upload!" : "Upload Product Photo"}
+                  {isDragActive ? "Drop to upload!" : isOnboardingMode ? "📸 Upload Your Product Photo" : "Upload Product Photo"}
                 </p>
                 <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
-                  Drag & drop or click · JPG, PNG, WEBP · Max 20MB
+                  Drag & drop or click Â· JPG, PNG, WEBP Â· Max 20MB
                 </p>
               </div>
             )}
@@ -467,7 +567,7 @@ export default function AIStudioPage() {
                 <Wand2 size={18} />
                 {operation === "remove_bg" ? "Remove Background"
                   : operation === "enhance" ? "Enhance Image"
-                  : "Run Full Pipeline"}
+                  : isOnboardingMode ? "✨ Run Full Pipeline & Continue →" : "Run Full Pipeline"}
               </span>
             </button>
           )}
@@ -552,6 +652,81 @@ export default function AIStudioPage() {
                 {operation === "remove_bg" ? "Removing background..." : "Enhancing image..."}
               </p>
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>This may take 15–60 seconds on first run</p>
+            </div>
+          )}
+
+          {/* ── ONBOARDING SUCCESS BANNER ── */}
+          {isOnboardingMode && isPipelineDone && !processing && images && (
+            <div
+              style={{
+                padding: "20px 24px",
+                borderRadius: 16,
+                background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.06))",
+                border: "1px solid rgba(16,185,129,0.4)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <div
+                  style={{
+                    width: 40, height: 40, borderRadius: "50%",
+                    background: "rgba(16,185,129,0.2)",
+                    border: "2px solid rgba(16,185,129,0.5)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "#10b981",
+                  }}
+                >
+                  <Check size={20} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontFamily: "Outfit", fontWeight: 700, color: "#10b981" }}>
+                    ✅ AI Studio Complete!
+                  </div>
+                  <div style={{ fontSize: 12, color: "#c4a882" }}>
+                    Your product image has been professionally processed.
+                  </div>
+                </div>
+              </div>
+
+              {/* Auto-navigate countdown */}
+              {onboardingContinueCountdown !== null && (
+                <div style={{ marginBottom: 14, textAlign: "center" }}>
+                  <div style={{ fontSize: 12, color: "#7d6548", marginBottom: 4 }}>
+                    Auto-navigating to Voice Cataloger in...
+                  </div>
+                  <div style={{ fontSize: 28, fontFamily: "Outfit", fontWeight: 900, color: "#f97316" }}>
+                    {onboardingContinueCountdown}s
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  onClick={() => {
+                    if (countdownRef.current) clearInterval(countdownRef.current);
+                    router.push("/voice-cataloger?onboarding=1");
+                  }}
+                  style={{
+                    flex: 1,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    padding: "12px 20px", borderRadius: 12,
+                    background: "linear-gradient(135deg, #f97316, #ea580c)",
+                    border: "none", cursor: "pointer", color: "white",
+                    fontSize: 14, fontFamily: "Outfit", fontWeight: 700,
+                    boxShadow: "0 4px 20px rgba(249,115,22,0.4)",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  <Mic size={16} />
+                  Continue to Voice Cataloger
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+
+              <div style={{ marginTop: 10, textAlign: "center" }}>
+                <span style={{ fontSize: 11, color: "#7d6548" }}>
+                  Step 2 of 4: Describe your product in your language →
+                </span>
+              </div>
             </div>
           )}
 
@@ -815,17 +990,11 @@ export default function AIStudioPage() {
                   >
                     <span className="relative z-10 flex items-center gap-2">
                       {attachingToProduct ? (
-                        <>
-                          <Loader2 size={16} className="animate-spin" /> Attaching to Product...
-                        </>
+                        <><Loader2 size={16} className="animate-spin" /> Attaching to Product...</>
                       ) : attachSuccess ? (
-                        <>
-                          <Check size={16} /> Attached to {targetProductName || "Product"}!
-                        </>
+                        <><Check size={16} /> Attached to {targetProductName || "Product"}!</>
                       ) : (
-                        <>
-                          <Sparkles size={16} /> Save & Attach Studio Images to {targetProductName || "Product"}
-                        </>
+                        <><Sparkles size={16} /> Save & Attach Studio Images to {targetProductName || "Product"}</>
                       )}
                     </span>
                   </button>
@@ -891,3 +1060,4 @@ export default function AIStudioPage() {
     </div>
   );
 }
+

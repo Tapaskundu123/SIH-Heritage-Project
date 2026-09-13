@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, Mic, AlertCircle, Sparkles, ShoppingBag, ShieldCheck } from "lucide-react";
 import axios from "axios";
+import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
 
 const CRAFTS = [
   "Weaving", "Pottery", "Embroidery", "Woodwork",
@@ -33,6 +34,7 @@ const LANGUAGES = [
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { startOnboarding } = useOnboardingPipeline();
   const [role, setRole] = useState<"artisan" | "buyer">("artisan");
   const [form, setForm] = useState({
     name: "",
@@ -96,7 +98,9 @@ export default function RegisterPage() {
         localStorage.setItem("ks_user", JSON.stringify(registeredUser));
 
         if (role === "artisan") {
-          router.push("/dashboard");
+          // Start the guided onboarding pipeline for new artisans
+          startOnboarding();
+          router.push("/ai-studio?onboarding=1");
         } else {
           router.push("/marketplace");
         }
