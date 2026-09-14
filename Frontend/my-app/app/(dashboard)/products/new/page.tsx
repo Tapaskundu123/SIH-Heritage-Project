@@ -13,7 +13,7 @@ export default function NewProductPage() {
   const router = useRouter();
   const [form, setForm] = useState({
     name: "", category: "textiles", description: "", price: "",
-    stock: "", unit: "piece", materials: "", tags: "",
+    stock: "10", unit: "piece", materials: "", tags: "",
     craftTechnique: "", isPublished: false, isB2BListed: false,
   });
   const [images, setImages] = useState<File[]>([]);
@@ -44,8 +44,8 @@ export default function NewProductPage() {
 
       await axios.post("http://localhost:5000/api/products", {
         ...form,
-        price: Number(form.price),
-        stock: Number(form.stock),
+        price: Number(form.price) || 0,
+        stock: Number(form.stock) > 0 ? Number(form.stock) : 10,
         materials: form.materials.split(",").map(s => s.trim()).filter(Boolean),
         tags: form.tags.split(",").map(s => s.trim()).filter(Boolean),
       }, { headers: { Authorization: `Bearer ${token}` } });

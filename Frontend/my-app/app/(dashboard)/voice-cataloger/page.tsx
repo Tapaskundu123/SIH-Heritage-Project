@@ -239,6 +239,7 @@ export default function VoiceCatalogerPage() {
         materials: String(editedProduct?.materials || "").split(",").map((m: string) => m.trim()).filter(Boolean),
         tags: String(editedProduct?.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
         price: Number(editedProduct?.price) || 0,
+        stock: Number(editedProduct?.stock) > 0 ? Number(editedProduct?.stock) : 10,
         voiceTranscript: result?.asr?.transcript,
         detectedLanguage: result?.asr?.detected_language,
         isAIGenerated: true,

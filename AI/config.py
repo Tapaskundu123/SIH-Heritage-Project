@@ -31,6 +31,10 @@ except Exception:
 import torch
 from pydantic_settings import BaseSettings
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load AI/.env into os.environ so libraries (huggingface_hub, tabpfn) can access tokens
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 class Settings(BaseSettings):
@@ -70,6 +74,9 @@ class Settings(BaseSettings):
         or os.getenv("HUGGING_FACE_HUB_TOKEN")
         or ""
     )
+
+    # TabPFN Token (multimodal pricing)
+    TABPFN_TOKEN: str = os.getenv("TABPFN_TOKEN", "")
 
     # Qwen 2.5-3B-Instruct (Hugging Face API)
     QWEN_MODEL: str = "Qwen/Qwen2.5-3B-Instruct"

@@ -92,7 +92,7 @@ const ProductSchema = new Schema<IProduct>(
       margin: Number,
     },
     unit: { type: String, default: 'piece' },
-    stock: { type: Number, default: 0, min: 0 },
+    stock: { type: Number, default: 10, min: 0 },
     lowStockThreshold: { type: Number, default: 5 },
     craftTechnique: { type: String },
     region: { type: String },

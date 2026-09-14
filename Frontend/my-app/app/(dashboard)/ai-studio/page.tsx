@@ -9,7 +9,8 @@ import {
   Upload, X, Scissors, Sparkles, Download, RefreshCw,
   ImageIcon, Loader2, Check, AlertCircle, Wand2, Zap,
   ChevronRight, Info, ShoppingBag, Layers, Eye, EyeOff,
-  ArrowRight, ShieldCheck, CheckCircle2, Mic, TrendingUp
+  ArrowRight, ShieldCheck, CheckCircle2, Mic, TrendingUp,
+  Camera, SwitchCamera, Video
 } from "lucide-react";
 import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
 import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banner";
@@ -104,6 +105,128 @@ export default function AIStudioPage() {
   const [bgBackdrop, setBgBackdrop] = useState<"checker" | "white" | "dark" | "cream">("checker");
   const [peekOriginal, setPeekOriginal] = useState(false);
 
+  // ── Camera & Photo Input states ──────────────────────────────────────────
+  const [inputTab, setInputTab] = useState<"upload" | "camera">("upload");
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
+  const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [shutterFlash, setShutterFlash] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraActive(false);
+    setCameraLoading(false);
+  }, []);
+
+  const startCamera = useCallback(async (facing: "user" | "environment" = facingMode) => {
+    setCameraError(null);
+    setCameraLoading(true);
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    try {
+      if (!navigator?.mediaDevices?.getUserMedia) {
+        throw new Error("Camera API is not supported in this browser environment.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setIsCameraActive(true);
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter((d) => d.kind === "videoinput");
+        setHasMultipleCameras(videoInputs.length > 1);
+      } catch {}
+    } catch (err: any) {
+      console.error("Camera access error:", err);
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setCameraError("Camera permission denied. Please allow camera access in your browser settings.");
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+        setCameraError("No camera device was found on this system. You can use the Upload Image option.");
+      } else if (err.name === "NotReadableError") {
+        setCameraError("Camera is currently in use by another application.");
+      } else {
+        setCameraError(err?.message || "Failed to start camera.");
+      }
+      setIsCameraActive(false);
+    } finally {
+      setCameraLoading(false);
+    }
+  }, [facingMode]);
+
+  const switchCamera = useCallback(() => {
+    const nextFacing = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(nextFacing);
+    startCamera(nextFacing);
+  }, [facingMode, startCamera]);
+
+  const captureImage = useCallback(() => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (!video.videoWidth || !video.videoHeight) return;
+
+    setShutterFlash(true);
+    setTimeout(() => setShutterFlash(false), 200);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const capturedFile = new File([blob], `camera-product-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        setFile(capturedFile);
+        const objUrl = URL.createObjectURL(blob);
+        setPreview(objUrl);
+        setImages(null);
+        setError("");
+        setActiveView("original");
+        setPipeline({ stage: 0, done: [] });
+        stopCamera();
+      },
+      "image/jpeg",
+      0.95
+    );
+  }, [stopCamera]);
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, [stopCamera]);
+
   // Target product integration (when opened from /products or /products/[id])
   const [targetProductId, setTargetProductId] = useState<string | null>(null);
   const [targetProductName, setTargetProductName] = useState<string | null>(null);
@@ -130,18 +253,39 @@ export default function AIStudioPage() {
 
   // Auto-navigate countdown to Voice Cataloger after pipeline done in onboarding mode
   const startOnboardingCountdown = useCallback(() => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
     setOnboardingContinueCountdown(4);
     countdownRef.current = setInterval(() => {
       setOnboardingContinueCountdown((c) => {
         if (c === null || c <= 1) {
-          if (countdownRef.current) clearInterval(countdownRef.current);
-          router.push("/voice-cataloger?onboarding=1");
-          return null;
+          return 0;
         }
         return c - 1;
       });
     }, 1000);
-  }, [router]);
+  }, []);
+
+  // Trigger navigation safely in useEffect when countdown hits 0 (avoids setState during render error)
+  useEffect(() => {
+    if (onboardingContinueCountdown === 0) {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+      setOnboardingContinueCountdown(null);
+      router.push("/voice-cataloger?onboarding=1");
+    }
+  }, [onboardingContinueCountdown, router]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+    };
+  }, []);
 
   const handleAttachToProduct = async () => {
     if (!targetProductId || !images) return;
@@ -199,8 +343,9 @@ export default function AIStudioPage() {
     multiple: false,
   });
 
-  const resetFile = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const resetFile = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    stopCamera();
     setFile(null);
     setPreview(null);
     setImages(null);
@@ -458,60 +603,472 @@ export default function AIStudioPage() {
         {/* ======== LEFT PANEL ======== */}
         <div className="lg:col-span-2 space-y-4">
 
-          {/* Upload Zone */}
-          <div
-            {...getRootProps()}
-            id="studio-upload-zone"
-            className={`upload-zone transition-all cursor-pointer ${isDragActive ? "drag-active" : ""}`}
-            style={{ padding: 0, minHeight: 220, position: "relative", overflow: "hidden" }}
-          >
-            <input {...getInputProps()} id="studio-file-input" />
-            {preview ? (
-              <div style={{ position: "relative", width: "100%", height: 220 }}>
+          {/* Mode Selector Tabs (Upload Image vs Open Camera) */}
+          {!preview && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+                padding: 4,
+                background: "rgba(30, 23, 18, 0.6)",
+                border: "1px solid rgba(245, 190, 130, 0.12)",
+                borderRadius: 14,
+              }}
+            >
+              <button
+                type="button"
+                id="studio-tab-upload"
+                onClick={() => {
+                  stopCamera();
+                  setInputTab("upload");
+                }}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: inputTab === "upload" ? "1px solid #f97316" : "1px solid transparent",
+                  background: inputTab === "upload" ? "rgba(249, 115, 22, 0.16)" : "transparent",
+                  color: inputTab === "upload" ? "#fb923c" : "var(--text-secondary)",
+                  fontFamily: "Outfit",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  transition: "all 0.2s ease",
+                }}
+              >
+                <Upload size={16} />
+                Upload Image
+              </button>
+
+              <button
+                type="button"
+                id="studio-tab-camera"
+                onClick={() => {
+                  setInputTab("camera");
+                  if (!isCameraActive) {
+                    startCamera();
+                  }
+                }}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: inputTab === "camera" ? "1px solid #818cf8" : "1px solid transparent",
+                  background: inputTab === "camera" ? "rgba(129, 140, 248, 0.16)" : "transparent",
+                  color: inputTab === "camera" ? "#a5b4fc" : "var(--text-secondary)",
+                  fontFamily: "Outfit",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  transition: "all 0.2s ease",
+                }}
+              >
+                <Camera size={16} />
+                Open Camera & Click Image
+              </button>
+            </div>
+          )}
+
+          {/* If an image is already selected/captured */}
+          {preview ? (
+            <div className="glass-card" style={{ padding: 12, overflow: "hidden" }}>
+              <div style={{ position: "relative", width: "100%", height: 260, borderRadius: 12, overflow: "hidden", background: "var(--bg-dark-3)" }}>
                 <img
                   src={preview}
-                  alt="Uploaded product"
-                  style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 14, background: "var(--bg-dark-3)" }}
+                  alt="Product preview"
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
                 <button
                   id="studio-clear-btn"
                   onClick={resetFile}
+                  title="Remove image"
                   style={{
                     position: "absolute", top: 10, right: 10,
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: "rgba(0,0,0,0.65)", border: "none", cursor: "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 30, height: 30, borderRadius: "50%",
+                    background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.2)",
+                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "white", transition: "all 0.2s",
                   }}
                 >
-                  <X size={14} color="white" />
+                  <X size={15} />
                 </button>
                 <div style={{
                   position: "absolute", bottom: 10, left: 10,
-                  background: "rgba(0,0,0,0.6)", borderRadius: 8, padding: "3px 10px",
-                  fontSize: 11, color: "#c4a882", fontFamily: "Outfit",
+                  background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+                  borderRadius: 8, padding: "4px 10px",
+                  fontSize: 11, color: "#f5efe6", fontFamily: "Outfit",
+                  display: "flex", alignItems: "center", gap: 6,
+                  border: "1px solid rgba(255,255,255,0.1)",
                 }}>
-                  {file?.name} Â· {(file!.size / 1024).toFixed(0)}KB
+                  <span style={{ color: "#fb923c", fontWeight: 600 }}>Active:</span>
+                  {file?.name || "image.jpg"} · {file ? (file.size / 1024).toFixed(0) : "0"}KB
                 </div>
               </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 220, padding: 24 }}>
+
+              {/* Action buttons to upload different or click new with camera */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+                <button
+                  type="button"
+                  id="studio-change-upload-btn"
+                  onClick={() => {
+                    resetFile();
+                    setInputTab("upload");
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(245, 190, 130, 0.15)",
+                    background: "rgba(249, 115, 22, 0.08)",
+                    color: "#f5efe6",
+                    fontSize: 12,
+                    fontFamily: "Outfit",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Upload size={13} color="#f97316" />
+                  Upload Different
+                </button>
+
+                <button
+                  type="button"
+                  id="studio-change-camera-btn"
+                  onClick={() => {
+                    resetFile();
+                    setInputTab("camera");
+                    startCamera();
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(129, 140, 248, 0.25)",
+                    background: "rgba(129, 140, 248, 0.08)",
+                    color: "#f5efe6",
+                    fontSize: 12,
+                    fontFamily: "Outfit",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Camera size={13} color="#818cf8" />
+                  Click New Photo
+                </button>
+              </div>
+            </div>
+          ) : inputTab === "upload" ? (
+            /* Option 1: Upload Zone */
+            <div
+              {...getRootProps()}
+              id="studio-upload-zone"
+              className={`upload-zone transition-all cursor-pointer ${isDragActive ? "drag-active" : ""}`}
+              style={{ padding: 0, minHeight: 260, position: "relative", overflow: "hidden" }}
+            >
+              <input {...getInputProps()} id="studio-file-input" />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260, padding: 24, textAlign: "center" }}>
                 <div style={{
                   width: 64, height: 64, borderRadius: 16,
                   background: isDragActive ? "rgba(249,115,22,0.2)" : "rgba(249,115,22,0.08)",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  marginBottom: 16, transition: "all 0.3s",
+                  marginBottom: 14, transition: "all 0.3s",
                 }}>
-                  <Upload size={28} color={isDragActive ? "#f97316" : "#7d6548"} />
+                  <Upload size={28} color={isDragActive ? "#f97316" : "#fb923c"} />
                 </div>
-                <p style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 15, color: isDragActive ? "#f97316" : "var(--text-primary)", marginBottom: 6 }}>
-                  {isDragActive ? "Drop to upload!" : isOnboardingMode ? "📸 Upload Your Product Photo" : "Upload Product Photo"}
+                <p style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 16, color: isDragActive ? "#f97316" : "var(--text-primary)", marginBottom: 6 }}>
+                  {isDragActive ? "Drop product photo here!" : isOnboardingMode ? "📸 Upload Product Photo" : "Upload Product Photo"}
                 </p>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
-                  Drag & drop or click Â· JPG, PNG, WEBP Â· Max 20MB
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 16, maxWidth: 260 }}>
+                  Drag & drop your file or click to browse · JPG, PNG, WEBP · Max 20MB
                 </p>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInputTab("camera");
+                    startCamera();
+                  }}
+                  style={{
+                    padding: "7px 16px",
+                    borderRadius: 20,
+                    background: "rgba(129, 140, 248, 0.12)",
+                    border: "1px solid rgba(129, 140, 248, 0.3)",
+                    color: "#a5b4fc",
+                    fontSize: 12,
+                    fontFamily: "Outfit",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Camera size={14} />
+                  Or Open Camera & Click Image
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* Option 2: Camera Capture View */
+            <div
+              className="glass-card"
+              style={{
+                minHeight: 260,
+                position: "relative",
+                overflow: "hidden",
+                border: "1px solid rgba(129, 140, 248, 0.25)",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {isCameraActive ? (
+                /* Active Viewfinder */
+                <div style={{ position: "relative", width: "100%", height: 300, background: "#050404" }}>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+
+                  {/* Viewfinder frame corners */}
+                  <div style={{ position: "absolute", top: 16, left: 16, width: 22, height: 22, borderTop: "2px solid #f97316", borderLeft: "2px solid #f97316" }} />
+                  <div style={{ position: "absolute", top: 16, right: 16, width: 22, height: 22, borderTop: "2px solid #f97316", borderRight: "2px solid #f97316" }} />
+                  <div style={{ position: "absolute", bottom: 64, left: 16, width: 22, height: 22, borderBottom: "2px solid #f97316", borderLeft: "2px solid #f97316" }} />
+                  <div style={{ position: "absolute", bottom: 64, right: 16, width: 22, height: 22, borderBottom: "2px solid #f97316", borderRight: "2px solid #f97316" }} />
+
+                  {/* Top bar controls */}
+                  <div style={{
+                    position: "absolute", top: 10, left: 10, right: 10,
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                  }}>
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      background: "rgba(0,0,0,0.65)", backdropFilter: "blur(6px)",
+                      padding: "4px 10px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)",
+                      fontSize: 11, color: "#34d399", fontWeight: 700, fontFamily: "Outfit",
+                    }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 8px #10b981" }} />
+                      LIVE CAMERA
+                    </div>
+
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {hasMultipleCameras && (
+                        <button
+                          type="button"
+                          onClick={switchCamera}
+                          title="Switch Camera"
+                          style={{
+                            width: 30, height: 30, borderRadius: "50%",
+                            background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.2)",
+                            color: "white", display: "flex", alignItems: "center", justifyContent: "center",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <SwitchCamera size={14} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={stopCamera}
+                        title="Close Camera"
+                        style={{
+                          width: 30, height: 30, borderRadius: "50%",
+                          background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.2)",
+                          color: "white", display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Shutter Flash effect */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background: "white",
+                      opacity: shutterFlash ? 0.9 : 0,
+                      pointerEvents: "none",
+                      transition: "opacity 0.2s ease-out",
+                    }}
+                  />
+
+                  {/* Bottom Shutter Controls */}
+                  <div style={{
+                    position: "absolute", bottom: 12, left: 0, right: 0,
+                    display: "flex", justifyContent: "center", alignItems: "center", gap: 12,
+                  }}>
+                    <button
+                      type="button"
+                      id="studio-click-image-btn"
+                      onClick={captureImage}
+                      style={{
+                        padding: "10px 24px",
+                        borderRadius: 24,
+                        background: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                        color: "white",
+                        fontFamily: "Outfit",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        border: "2px solid rgba(255,255,255,0.85)",
+                        boxShadow: "0 4px 20px rgba(249, 115, 22, 0.5)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <Camera size={17} />
+                      Click Image
+                    </button>
+                  </div>
+                </div>
+              ) : cameraLoading ? (
+                /* Loading spinner */
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260, padding: 24 }}>
+                  <Loader2 size={36} className="animate-spin" color="#f97316" style={{ marginBottom: 12 }} />
+                  <p style={{ fontFamily: "Outfit", fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
+                    Starting Camera...
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Please grant camera permission in your browser
+                  </p>
+                </div>
+              ) : (
+                /* Camera Standby Card */
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 260, padding: 24, textAlign: "center" }}>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: 16,
+                    background: "rgba(129, 140, 248, 0.12)",
+                    border: "1px solid rgba(129, 140, 248, 0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    marginBottom: 14,
+                  }}>
+                    <Camera size={30} color="#818cf8" />
+                  </div>
+                  <p style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 16, color: "var(--text-primary)", marginBottom: 4 }}>
+                    Live Camera Studio
+                  </p>
+                  <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 18, maxWidth: 280 }}>
+                    Click below to open your camera, align your product in the viewfinder, and click the image.
+                  </p>
+
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, width: "100%" }}>
+                    <button
+                      type="button"
+                      id="studio-open-camera-btn"
+                      onClick={() => startCamera()}
+                      className="btn-primary"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "11px 28px",
+                        fontSize: 14,
+                        width: "auto",
+                      }}
+                    >
+                      <Camera size={17} />
+                      Open Camera
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setInputTab("upload")}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--text-muted)",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      Or switch back to Upload Image
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Camera Error Alert */}
+              {cameraError && (
+                <div style={{
+                  padding: 12,
+                  margin: 10,
+                  borderRadius: 10,
+                  background: "rgba(239,68,68,0.12)",
+                  border: "1px solid rgba(239,68,68,0.3)",
+                  color: "#fca5a5",
+                  fontSize: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                    <span>{cameraError}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={() => startCamera()}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        background: "#ef4444",
+                        color: "white",
+                        border: "none",
+                        fontSize: 11,
+                        cursor: "pointer",
+                        fontFamily: "Outfit",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Try Again
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCameraError(null);
+                        setInputTab("upload");
+                      }}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        background: "rgba(255,255,255,0.1)",
+                        color: "white",
+                        border: "none",
+                        fontSize: 11,
+                        cursor: "pointer",
+                        fontFamily: "Outfit",
+                      }}
+                    >
+                      Use Upload Instead
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Operation Selector */}
           {file && (

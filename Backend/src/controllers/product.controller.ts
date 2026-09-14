@@ -4,14 +4,17 @@ import Inventory from '../models/Inventory';
 
 export const createProduct = async (req: Request & { userId?: string }, res: Response): Promise<void> => {
   try {
-    const productData = { ...req.body, artisanId: req.userId };
+    const rawStock = req.body.stock !== undefined && req.body.stock !== '' ? Number(req.body.stock) : 10;
+    const stock = !isNaN(rawStock) && rawStock > 0 ? rawStock : 10;
+    const productData = { ...req.body, stock, artisanId: req.userId };
     const product = await Product.create(productData);
 
     // Create inventory record
     await Inventory.create({
       productId: product._id,
       artisanId: req.userId,
-      currentStock: product.stock || 0,
+      currentStock: product.stock,
+      lowStockThreshold: product.lowStockThreshold || 5,
     });
 
     res.status(201).json({ success: true, data: product });

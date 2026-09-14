@@ -1,24 +1,24 @@
 """
 SigLIP Pricing Router — Multimodal AI Price Prediction
-Pipeline: SigLIP Vision Encoder → Feature Fusion → TabPFN In-Context Learner
+Pipeline: SigLIP Vision Encoder -> Feature Fusion -> TabPFN In-Context Learner
 
 Endpoint: POST /ai/pricing/predict-siglip
 Input:  product image (multipart) + tabular product features (form fields)
 Output: predicted price with confidence interval and reasoning
 
-NOTE — TabPFN License:
-  TabPFN v8.5+ requires a free license token from https://ux.priorlabs.ai
-  Set environment variable: TABPFN_TOKEN="<your-api-key>"
-  Without the token, the k-NN fallback estimator is used automatically.
+Training data: Adapala/product_data (HuggingFace) - 185 handicraft products, price Rs.75-3000
+Feature schema (9 features):
+  cat_enc, tech_enc, has_silk, has_gold, has_handmade, region_enc,
+  discount_enc, rating, desc_len
 
-NOTE — SigLIP:
-  Requires transformers>=4.44.0 and model download (~900MB, cached after first run).
-  Without it, an OpenCV HSV histogram fallback is used automatically.
+NOTE: Run AI/scratch/train_tabpfn_from_hf.py to refresh training data.
 """
 
 import io
+import json
 import logging
 import numpy as np
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
@@ -27,60 +27,95 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# â”€â”€â”€ In-Context Training Examples for TabPFN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# These are craft market price examples used for in-context learning.
-# Format: [category_enc, material_count, has_silk, has_gold, technique_enc, description_len] -> price (INR)
-# Category encoding: textiles=0, jewelry=1, pottery=2, woodwork=3, metalwork=4, paintings=5, other=6
-# Technique encoding: handwoven=0, embroidered=1, carved=2, cast=3, printed=4, other=5
+# ─── Load trained TabPFN context data (from HF dataset) ──────────────────────
+# Falls back to hardcoded examples if trained .npy files not found.
 
-CRAFT_EXAMPLES = np.array([
-    # cat, mat_count, has_silk, has_gold, technique, desc_len,  price
-    [0,    2,         1,        0,        0,          80],        # Banarasi silk sari
-    [0,    3,         1,        1,        0,          120],       # Kanjivaram gold silk
-    [0,    2,         0,        0,        1,          60],        # Phulkari embroidery
-    [1,    1,         0,        1,        3,          100],       # Gold jewelry
-    [1,    2,         0,        0,        3,          50],        # Silver jewelry
-    [1,    1,         0,        0,        2,          40],        # Stone jewelry
-    [2,    1,         0,        0,        5,          30],        # Basic pottery
-    [2,    2,         0,        0,        2,          60],        # Terracotta art
-    [3,    1,         0,        0,        2,          70],        # Carved wood
-    [3,    2,         0,        0,        2,          90],        # Sandalwood art
-    [4,    1,         0,        0,        3,          80],        # Brass casting
-    [4,    2,         0,        1,        3,          120],       # Bronze idol
-    [5,    3,         0,        0,        4,          150],       # Madhubani painting
-    [5,    2,         0,        0,        4,          200],       # Warli art large
-    [0,    1,         0,        0,        0,          25],        # Simple cotton weave
-    [0,    2,         0,        0,        1,          45],        # Kashmiri embroidery
-], dtype=np.float32)
+_MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "tabpfn_craft_pricing"
 
-# Price mapping (INR hundreds) â€” we scale 25 â†’ â‚¹2500, 200 â†’ â‚¹20000
-EXAMPLE_PRICES = np.array([
-    3500, 8500, 2200, 15000, 4500, 1800,
-    800,  2500, 3000, 6500,  3200, 12000,
-    4500, 8000, 1200, 3800,
-], dtype=np.float32)
+# 9-feature schema matching training pipeline
+FEATURE_COLS = [
+    "cat_enc", "tech_enc", "has_silk", "has_gold",
+    "has_handmade", "region_enc", "discount_enc", "rating", "desc_len"
+]
 
-# â”€â”€â”€ Category / Technique encodings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _load_craft_examples():
+    """Load trained examples from .npy files. Falls back to hardcoded data."""
+    try:
+        X = np.load(_MODEL_DIR / "craft_examples_X.npy")
+        y = np.load(_MODEL_DIR / "craft_examples_y.npy")
+        meta_path = _MODEL_DIR / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        n = len(y)
+        source = meta.get("source", "trained")
+        logger.info(f"Loaded {n} trained craft examples from {source} (MAE: Rs.{meta.get('mae', 0):.0f})")
+        return X.astype(np.float32), y.astype(np.float32), n
+    except Exception as e:
+        logger.warning(f"Could not load trained examples ({e}), using hardcoded fallback")
+        # Hardcoded fallback — 9-feature schema
+        # [cat, tech, has_silk, has_gold, has_handmade, region, discount_pct, rating, desc_len]
+        X_fallback = np.array([
+            [0, 0, 1, 0, 1, 2, 0,  4.2, 80],   # Kashmiri silk shawl
+            [0, 1, 0, 0, 1, 1, 10, 4.0, 60],   # Rajasthani phulkari
+            [1, 3, 0, 1, 1, 0, 0,  4.5, 50],   # Gold-toned brass jewelry
+            [1, 3, 0, 0, 1, 0, 5,  3.8, 40],   # Silver anklet
+            [2, 5, 0, 0, 1, 7, 0,  4.1, 45],   # Odisha terracotta
+            [2, 5, 0, 0, 1, 0, 0,  4.0, 30],   # Basic clay pot
+            [3, 2, 0, 0, 1, 1, 15, 4.3, 70],   # Carved wooden camel
+            [3, 2, 0, 0, 1, 0, 0,  4.0, 90],   # Bamboo basket
+            [4, 3, 0, 1, 1, 0, 0,  4.4, 80],   # Brass Ganesh idol
+            [4, 3, 0, 1, 1, 6, 0,  4.6, 120],  # Bastar Dokra bronze
+            [5, 4, 0, 0, 1, 4, 0,  4.5, 150],  # Madhubani painting
+            [5, 4, 0, 0, 1, 4, 0,  4.7, 200],  # Warli large art
+            [0, 0, 0, 0, 1, 0, 20, 3.9, 25],   # Simple cotton weave
+            [0, 1, 0, 0, 1, 3, 0,  4.1, 45],   # Bengali kantha stitch
+            [6, 5, 0, 0, 1, 0, 0,  3.8, 35],   # Jute bag
+            [6, 5, 0, 0, 1, 0, 10, 4.0, 40],   # Macrame wall hanging
+        ], dtype=np.float32)
+        y_fallback = np.array([
+            2200, 800, 1500, 600, 350, 150,
+            450,  200, 800,  2500, 1800, 3500,
+            120,  350, 180, 250,
+        ], dtype=np.float32)
+        return X_fallback, y_fallback, len(y_fallback)
+
+CRAFT_EXAMPLES, EXAMPLE_PRICES, N_CRAFT_EXAMPLES = _load_craft_examples()
+
+# ─── Category / Technique encodings ──────────────────────────────────────────
 
 CATEGORY_MAP = {
-    "textiles": 0, "jewelry": 1, "pottery": 2, "woodwork": 3,
-    "metalwork": 4, "paintings": 5, "leather": 6, "bamboo": 6,
-    "stone": 2, "other": 6,
+    "textiles": 0, "textile": 0, "fabric": 0, "saree": 0, "sari": 0,
+    "silk": 0, "handwoven": 0, "weaving": 0, "embroidery": 0,
+    "jewelry": 1, "jewellery": 1, "necklace": 1, "earring": 1, "bangle": 1,
+    "pottery": 2, "terracotta": 2, "clay": 2, "stone": 2, "ceramic": 2,
+    "woodwork": 3, "wood": 3, "bamboo": 3, "cane": 3, "basket": 3,
+    "metalwork": 4, "brass": 4, "copper": 4, "bronze": 4,
+    "paintings": 5, "painting": 5, "art": 5, "madhubani": 5, "warli": 5,
+    "leather": 6, "jute": 6, "macrame": 6, "other": 6,
 }
 
 TECHNIQUE_MAP = {
-    "handwoven": 0, "hand-woven": 0, "weaving": 0,
+    "handwoven": 0, "hand-woven": 0, "weaving": 0, "loom": 0,
     "embroidered": 1, "embroidery": 1, "kantha": 1, "phulkari": 1,
     "carved": 2, "carving": 2, "chiseled": 2,
     "cast": 3, "casting": 3, "forged": 3,
-    "printed": 4, "block print": 4, "screen print": 4,
+    "printed": 4, "block print": 4, "screen print": 4, "kalamkari": 4,
+}
+
+REGION_MAP = {
+    "rajasthan": 1, "rajasthani": 1,
+    "kashmir": 2, "kashmiri": 2,
+    "gujarat": 3, "gujarati": 3,
+    "bengal": 4, "bengali": 4,
+    "kerala": 5,
+    "bastar": 6, "chhattisgarh": 6,
+    "odisha": 7, "orissa": 7,
 }
 
 SILK_KEYWORDS = {"silk", "silken", "banarasi", "kanjivaram", "patola", "paithani", "pashmina"}
 GOLD_KEYWORDS = {"gold", "zari", "zardozi", "golden", "gilt", "bronze", "brass"}
 
 
-# â”€â”€â”€ Feature extraction helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Feature extraction helpers ──────────────────────────────────────────────
 
 def _encode_tabular_features(
     category: str,
@@ -88,27 +123,55 @@ def _encode_tabular_features(
     craft_technique: str,
     tags: str,
     description: str,
+    region: str = "",
+    discount_pct: float = 0.0,
+    rating: float = 4.0,
 ) -> np.ndarray:
-    """Convert text product specs into a numeric feature vector."""
-    cat_enc = CATEGORY_MAP.get(category.lower().strip(), 6)
+    """
+    Encode product fields into the 9-feature vector matching training schema:
+    [cat_enc, tech_enc, has_silk, has_gold, has_handmade, region_enc,
+     discount_enc, rating, desc_len]
+    """
+    all_text = f"{category} {materials} {craft_technique} {tags} {description} {region}".lower()
 
-    mat_list = [m.strip().lower() for m in materials.split(",") if m.strip()]
-    mat_count = min(len(mat_list), 5)
-
-    all_text = f"{materials} {tags} {description}".lower()
-    has_silk = int(any(k in all_text for k in SILK_KEYWORDS))
-    has_gold = int(any(k in all_text for k in GOLD_KEYWORDS))
-
-    tech_lower = craft_technique.lower().strip()
-    technique_enc = 5  # default: other
-    for key, val in TECHNIQUE_MAP.items():
-        if key in tech_lower:
-            technique_enc = val
+    # Category
+    cat_enc = 6  # other
+    for kw, val in CATEGORY_MAP.items():
+        if kw in all_text:
+            cat_enc = val
             break
 
-    desc_len = min(len(description), 200) / 200.0 * 100  # normalized 0-100
+    # Technique
+    tech_enc = 5  # other
+    for kw, val in TECHNIQUE_MAP.items():
+        if kw in all_text:
+            tech_enc = val
+            break
 
-    return np.array([cat_enc, mat_count, has_silk, has_gold, technique_enc, desc_len], dtype=np.float32)
+    # Binary flags
+    has_silk     = int(any(k in all_text for k in SILK_KEYWORDS))
+    has_gold     = int(any(k in all_text for k in GOLD_KEYWORDS))
+    has_handmade = int(
+        "handmade" in all_text or "handcrafted" in all_text or "hand crafted" in all_text
+    )
+
+    # Region premium encoding
+    region_enc = 0
+    for kw, val in REGION_MAP.items():
+        if kw in all_text:
+            region_enc = val
+            break
+
+    # Numeric features
+    discount_enc = float(discount_pct)  # 0-100
+    rating_val   = max(1.0, min(5.0, float(rating)))
+    desc_len     = min(len(description), 500) / 500.0 * 100  # normalized 0-100
+
+    return np.array(
+        [cat_enc, tech_enc, has_silk, has_gold, has_handmade,
+         region_enc, discount_enc, rating_val, desc_len],
+        dtype=np.float32
+    )
 
 
 def _extract_siglip_embedding(image_bytes: bytes, device: str = "cpu") -> np.ndarray:
@@ -137,15 +200,41 @@ def _extract_siglip_embedding(image_bytes: bytes, device: str = "cpu") -> np.nda
 
         with torch.no_grad():
             outputs = model.get_image_features(**inputs)
-            embedding = outputs[0].cpu().numpy()
+            if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+                tensor = outputs.pooler_output
+            elif hasattr(outputs, "image_embeds") and outputs.image_embeds is not None:
+                tensor = outputs.image_embeds
+            elif isinstance(outputs, torch.Tensor):
+                tensor = outputs
+            elif hasattr(outputs, "last_hidden_state"):
+                tensor = outputs.last_hidden_state.mean(dim=1)
+            else:
+                tensor = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
 
-        # L2 normalize
+            if hasattr(tensor, "cpu"):
+                raw_embedding = tensor.cpu().numpy()
+            else:
+                raw_embedding = np.asarray(tensor)
+
+        arr = np.asarray(raw_embedding, dtype=np.float32)
+        if arr.ndim == 3:
+            arr = arr.mean(axis=1)
+        if arr.ndim == 2:
+            arr = arr[0]
+
+        embedding = arr.flatten()
+
+        if len(embedding) > 768:
+            embedding = embedding[:768]
+        elif len(embedding) < 768:
+            embedding = np.pad(embedding, (0, 768 - len(embedding)))
+
         norm = np.linalg.norm(embedding)
         if norm > 0:
             embedding = embedding / norm
 
         logger.info(f"SigLIP embedding extracted: shape={embedding.shape}")
-        return embedding
+        return embedding.astype(np.float32)
 
     except Exception as e:
         logger.warning(f"SigLIP unavailable ({e}), using fallback color features")
@@ -154,7 +243,7 @@ def _extract_siglip_embedding(image_bytes: bytes, device: str = "cpu") -> np.nda
 
 def _fallback_image_features(image_bytes: bytes) -> np.ndarray:
     """
-    Lightweight fallback: HSV histogram + edge density features â†’ 768-dim padded vector.
+    Lightweight fallback: HSV histogram + edge density features -> 768-dim padded vector.
     Used when SigLIP model is not available (offline/no GPU).
     """
     try:
@@ -163,80 +252,75 @@ def _fallback_image_features(image_bytes: bytes) -> np.ndarray:
         img_array = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         if img is None:
-            return np.random.randn(768).astype(np.float32) * 0.01
+            return (np.random.randn(768).astype(np.float32) * 0.01).flatten()
 
-        # Resize to 224x224
         img_resized = cv2.resize(img, (224, 224))
         hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
 
-        # HSV histogram (32 bins each â†’ 96 features)
         h_hist = cv2.calcHist([hsv], [0], None, [32], [0, 180]).flatten()
         s_hist = cv2.calcHist([hsv], [1], None, [32], [0, 256]).flatten()
         v_hist = cv2.calcHist([hsv], [2], None, [32], [0, 256]).flatten()
 
-        # Edge density
         gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
         edge_density = edges.mean() / 255.0
 
-        features = np.concatenate([h_hist, s_hist, v_hist, [edge_density]])  # 97 features
-        # Normalize
+        features = np.concatenate([h_hist, s_hist, v_hist, [edge_density]])
         norm = np.linalg.norm(features)
         features = features / (norm + 1e-8)
 
-        # Pad to 768 with small noise
         padded = np.zeros(768, dtype=np.float32)
         padded[: len(features)] = features
-        return padded
+        return padded.flatten()
 
     except Exception:
         return np.zeros(768, dtype=np.float32)
 
 
-def _tabpfn_predict(fused_features: np.ndarray) -> tuple[float, float, float]:
+def _tabpfn_predict(tabular_features: np.ndarray) -> tuple[float, float, float]:
     """
-    TabPFN in-context price regression (v8.5 TabPFNRegressor).
-    Uses the curated CRAFT_EXAMPLES as training context.
+    TabPFN in-context price regression using trained HF dataset examples.
+    Uses 9-feature schema: cat_enc, tech_enc, has_silk, has_gold, has_handmade,
+    region_enc, discount_enc, rating, desc_len.
     Returns (predicted_price, confidence_low, confidence_high).
     """
     try:
         from tabpfn import TabPFNRegressor  # type: ignore
 
-        reg = TabPFNRegressor(device="cpu", n_estimators=8)
-        reg.fit(CRAFT_EXAMPLES, EXAMPLE_PRICES)
+        query = tabular_features[:9].reshape(1, -1)
+        X_ctx = CRAFT_EXAMPLES[:, :9]
 
-        query = fused_features[:6].reshape(1, -1)  # use first 6 tabular features
+        reg = TabPFNRegressor(device="cpu", ignore_pretraining_limits=True)
+        reg.fit(X_ctx, EXAMPLE_PRICES)
 
-        # Predict point estimate
         predicted = float(reg.predict(query)[0])
 
-        # Confidence interval via quantile prediction (TabPFN v8.5 supports this)
         try:
-            q_low = float(reg.predict(query, quantile=0.15)[0])
+            q_low  = float(reg.predict(query, quantile=0.15)[0])
             q_high = float(reg.predict(query, quantile=0.85)[0])
         except Exception:
-            # Fallback: ±28% interval if quantile not supported
-            q_low = predicted * 0.72
+            q_low  = predicted * 0.72
             q_high = predicted * 1.32
 
         return predicted, max(0.0, q_low), q_high
 
     except ImportError:
-        logger.warning("TabPFN not installed — using weighted k-NN fallback")
-        return _knn_price_estimate(fused_features)
+        logger.warning("TabPFN not installed - using weighted k-NN fallback")
+        return _knn_price_estimate(tabular_features)
     except Exception as e:
-        logger.warning(f"TabPFN inference failed ({e}) — using weighted k-NN fallback")
-        return _knn_price_estimate(fused_features)
+        logger.warning(f"TabPFN inference failed ({e}) - using weighted k-NN fallback")
+        return _knn_price_estimate(tabular_features)
 
 
-def _knn_price_estimate(fused_features: np.ndarray) -> tuple[float, float, float]:
+def _knn_price_estimate(tabular_features: np.ndarray) -> tuple[float, float, float]:
     """
-    Fallback k-NN price estimator using the in-context examples.
-    Uses weighted Euclidean distance on tabular features.
+    Fallback k-NN price estimator using trained craft examples.
+    Uses weighted Euclidean distance on 9 tabular features.
     """
-    query_tab = fused_features[:6]
+    n_feat = CRAFT_EXAMPLES.shape[1]
+    query_tab = tabular_features[:n_feat]
     distances = np.linalg.norm(CRAFT_EXAMPLES - query_tab, axis=1)
-    distances = distances + 1e-8  # avoid zero division
+    distances = distances + 1e-8
 
     k = min(5, len(EXAMPLE_PRICES))
     top_k_idx = np.argsort(distances)[:k]
@@ -276,13 +360,13 @@ def _generate_pricing_reasoning(
         parts.append(f"Materials used: {', '.join(mat_list[:3])}")
 
     parts.append(
-        f"Market confidence range â‚¹{int(confidence_low):,}—â‚¹{int(confidence_high):,} based on {len(CRAFT_EXAMPLES)} similar craft market examples"
+        f"Market confidence range Rs.{int(confidence_low):,}-Rs.{int(confidence_high):,} based on {N_CRAFT_EXAMPLES} real handicraft market examples from HuggingFace dataset"
     )
 
     return ". ".join(parts) + "."
 
 
-# â”€â”€â”€ Main Endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Main Endpoint ────────────────────────────────────────────────────────────
 
 @router.post("/predict-siglip")
 async def predict_price_siglip(
@@ -292,28 +376,30 @@ async def predict_price_siglip(
     craft_technique: str = Form(""),
     tags: str = Form(""),
     description: str = Form(""),
+    region: str = Form(""),
+    discount_pct: float = Form(0.0),
+    rating: float = Form(4.0),
 ):
     """
     Multimodal AI price prediction using:
-    1. SigLIP vision encoder â†’ 768-dim image embedding
+    1. SigLIP vision encoder -> 768-dim image embedding
     2. Tabular feature encoding (category, materials, technique, tags)
     3. Feature fusion (image embedding + tabular features)
     4. TabPFN in-context price regression
 
     Returns predicted price with confidence interval and reasoning.
     """
-    logger.info(f"ðŸ§  SigLIP+TabPFN price prediction for category={category}, technique={craft_technique}")
+    logger.info(f"🧠 SigLIP+TabPFN price prediction for category={category}, technique={craft_technique}")
 
-    # Read and validate image
     image_bytes = await image.read()
     if len(image_bytes) > 30 * 1024 * 1024:
-        raise HTTPException(400, "Image too large â€” max 30MB")
+        raise HTTPException(400, "Image too large — max 30MB")
 
     if not image_bytes:
         raise HTTPException(400, "Empty image")
 
     try:
-        # â”€â”€ Step 1: SigLIP image embedding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Step 1: SigLIP image embedding ────────────────────
         logger.info("  Step 1/3: Extracting SigLIP image embedding...")
         try:
             import torch
@@ -324,7 +410,7 @@ async def predict_price_siglip(
         image_embedding = _extract_siglip_embedding(image_bytes, device=device)
         embedding_norm = float(np.linalg.norm(image_embedding))
 
-        # â”€â”€ Step 2: Tabular feature encoding + fusion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Step 2: Tabular feature encoding + fusion ────────
         logger.info("  Step 2/3: Encoding tabular features and fusing...")
         tabular_features = _encode_tabular_features(
             category=category,
@@ -332,28 +418,29 @@ async def predict_price_siglip(
             craft_technique=craft_technique,
             tags=tags,
             description=description,
-        )
+            region=region,
+            discount_pct=discount_pct,
+            rating=rating,
+        ).flatten()
 
-        # Fuse: concat tabular features at the front, then image embedding
-        # TabPFN will use only the first 6 features; the full vector is available for future use
-        fused_features = np.concatenate([tabular_features, image_embedding[:50]])  # 56-dim fusion
+        image_vec = np.asarray(image_embedding, dtype=np.float32).flatten()
+        fused_features = np.concatenate([tabular_features, image_vec[:50]])
         fused_features = fused_features.astype(np.float32)
 
-        # â”€â”€ Step 3: TabPFN price regression â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        logger.info("  Step 3/3: TabPFN in-context price regression...")
-        predicted_price, confidence_low, confidence_high = _tabpfn_predict(fused_features)
+        # ── Step 3: TabPFN price regression ──────────────────
+        logger.info("  Step 3/3: TabPFN price regression on trained HF examples...")
+        predicted_price, confidence_low, confidence_high = _tabpfn_predict(tabular_features)
 
-        # Sanity clamp: prices between â‚¹200 and â‚¹5,00,000
-        predicted_price = max(200.0, min(500000.0, predicted_price))
-        confidence_low = max(100.0, min(predicted_price, confidence_low))
-        confidence_high = max(predicted_price, min(1000000.0, confidence_high))
+        # Sanity clamp: prices between Rs.50 and Rs.3,00,000
+        predicted_price = max(50.0, min(300000.0, predicted_price))
+        confidence_low  = max(30.0, min(predicted_price, confidence_low))
+        confidence_high = max(predicted_price, min(600000.0, confidence_high))
 
-        # Determine which model was used
         try:
             import tabpfn  # type: ignore
-            model_label = "SigLIP-768 + TabPFN Regressor"
+            model_label = f"SigLIP-768 + TabPFN (HF-trained, {N_CRAFT_EXAMPLES} examples)"
         except ImportError:
-            model_label = "SigLIP-768 + Weighted k-NN Estimator"
+            model_label = f"SigLIP-768 + Weighted k-NN (HF-trained, {N_CRAFT_EXAMPLES} examples)"
 
         reasoning = _generate_pricing_reasoning(
             category=category,
@@ -367,8 +454,8 @@ async def predict_price_siglip(
         )
 
         logger.info(
-            f"âœ… Price prediction complete: â‚¹{int(predicted_price):,} "
-            f"[â‚¹{int(confidence_low):,}—â‚¹{int(confidence_high):,}] via {model_label}"
+            f"Price prediction: Rs.{int(predicted_price):,} "
+            f"[Rs.{int(confidence_low):,}-Rs.{int(confidence_high):,}] via {model_label}"
         )
 
         return {

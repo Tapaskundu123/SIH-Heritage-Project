@@ -172,6 +172,7 @@ export default function PricePredictionPage() {
         detectedLanguage: voiceSpecs.detectedLanguage,
         images,
         isPublished: true,
+        stock: 10,
       };
 
       const res = await axios.post("http://localhost:5000/api/products", payload, {
