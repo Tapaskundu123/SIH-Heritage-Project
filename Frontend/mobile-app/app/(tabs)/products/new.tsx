@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TextInput, TouchableOpacity,
   StyleSheet, Platform, Alert, Image, KeyboardAvoidingView,
@@ -10,18 +10,57 @@ import * as ImagePicker from 'expo-image-picker';
 import api from '../../../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../../../constants/theme';
 import GradientButton from '../../../components/GradientButton';
+import { useOnboardingPipeline } from '../../../constants/pipeline';
 
 const CRAFT_TYPES = ['Pottery', 'Weaving', 'Embroidery', 'Wood Carving', 'Metal Work', 'Jewelry', 'Painting', 'Leather Work', 'Bamboo Craft', 'Stone Craft', 'Other'];
 
 export default function NewProductScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [form, setForm] = useState({
-    name: '', description: '', category: '', price: '', stock: '',
+    name: '', description: '', category: '', price: '', stock: '1',
     materials: '', craftingTime: '', region: '',
   });
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // Auto-fill from pipeline data if available
+  useEffect(() => {
+    if (!pipeline.hydrated) return;
+    const patch: Partial<typeof form> = {};
+    let filled = false;
+
+    if (pipeline.voiceSpecs) {
+      if (pipeline.voiceSpecs.name) patch.name = pipeline.voiceSpecs.name;
+      if (pipeline.voiceSpecs.description) patch.description = pipeline.voiceSpecs.description;
+      if (pipeline.voiceSpecs.category) {
+        // Match or default
+        const match = CRAFT_TYPES.find(c => c.toLowerCase() === pipeline.voiceSpecs?.category.toLowerCase());
+        patch.category = match || pipeline.voiceSpecs.category;
+      }
+      if (pipeline.voiceSpecs.materials) patch.materials = pipeline.voiceSpecs.materials;
+      filled = true;
+    }
+
+    if (pipeline.predictedPrice?.recommended_price) {
+      patch.price = String(pipeline.predictedPrice.recommended_price);
+      filled = true;
+    } else if (pipeline.voiceSpecs?.price_hint) {
+      patch.price = String(pipeline.voiceSpecs.price_hint);
+      filled = true;
+    }
+
+    if (filled) {
+      setForm((prev) => ({ ...prev, ...patch }));
+      setAutoFilled(true);
+    }
+
+    if (pipeline.studioImages?.localUri) {
+      setImages((prev) => prev.length === 0 ? [pipeline.studioImages!.localUri!] : prev);
+    }
+  }, [pipeline.hydrated, pipeline.voiceSpecs, pipeline.predictedPrice, pipeline.studioImages]);
 
   const update = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -51,7 +90,14 @@ export default function NewProductScreen() {
       });
       const res = await api.post('/products', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       if (res.data.success) {
-        Alert.alert('Success! 🎉', 'Product added successfully!', [{ text: 'OK', onPress: () => router.back() }]);
+        if (pipeline.isOnboarding) {
+          pipeline.completeOnboarding(res.data.data?._id || 'new');
+          Alert.alert('Congratulations! 🎉', 'Your first product is now live on KarigarSetu marketplace!', [
+            { text: 'Go to Dashboard', onPress: () => router.replace('/(tabs)/dashboard') }
+          ]);
+        } else {
+          Alert.alert('Success! 🎉', 'Product added successfully!', [{ text: 'OK', onPress: () => router.back() }]);
+        }
       }
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.message || 'Failed to add product.');
@@ -93,6 +139,18 @@ export default function NewProductScreen() {
         </LinearGradient>
 
         <View style={styles.form}>
+          {/* AI Pipeline Auto-fill Notification */}
+          {autoFilled && (
+            <View style={styles.pipelineBadge}>
+              <Feather name="zap" size={14} color={Colors.saffron} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pipelineBadgeTitle}>Auto-filled by AI Pipeline</Text>
+                <Text style={styles.pipelineBadgeDesc}>Details pulled from your AI Photo, Voice Cataloger & AI Pricing steps.</Text>
+              </View>
+              <Feather name="check-circle" size={16} color={Colors.emerald} />
+            </View>
+          )}
+
           {/* Images */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Product Images (up to 5)</Text>
@@ -186,4 +244,28 @@ const styles = StyleSheet.create({
   dropdownText: { color: Colors.textMuted, fontFamily: Fonts.outfit, fontSize: 14 },
   cancelBtn: { alignItems: 'center', paddingVertical: Spacing.md },
   cancelText: { color: Colors.textDim, fontFamily: Fonts.outfit, fontSize: 14 },
+  pipelineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(249,115,22,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.3)',
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  pipelineBadgeTitle: {
+    fontSize: 13,
+    fontFamily: Fonts.outfitBold,
+    color: Colors.saffron,
+    marginBottom: 2,
+  },
+  pipelineBadgeDesc: {
+    fontSize: 11,
+    fontFamily: Fonts.outfit,
+    color: Colors.textMuted,
+    lineHeight: 16,
+  },
 });
+

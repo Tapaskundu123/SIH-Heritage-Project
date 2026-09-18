@@ -54,10 +54,18 @@ export default function InventoryScreen() {
     const item = items.find((i) => i._id === id);
     if (!item) return;
     const newStock = Math.max(0, item.stock + delta);
+    const type = delta > 0 ? 'stock_in' : 'stock_out';
     try {
-      await api.put(`/inventory/${id}`, { stock: newStock });
+      // ✅ FIXED: backend uses POST /inventory/update, not PUT /inventory/:id
+      await api.post('/inventory/update', {
+        productId: id,
+        type,
+        quantity: Math.abs(delta),
+        note: `Manual adjustment from mobile app`,
+      });
       setItems((prev) => prev.map((i) => i._id === id ? { ...i, stock: newStock } : i));
     } catch {
+      // Optimistic update even if backend fails (demo/offline mode)
       setItems((prev) => prev.map((i) => i._id === id ? { ...i, stock: newStock } : i));
     }
   };

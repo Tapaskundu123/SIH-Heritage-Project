@@ -153,7 +153,7 @@ export default function FeaturesPage() {
             <ul className="space-y-2 text-xs text-stone-300">
               <li className="flex items-center gap-2">
                 <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
-                <span>Supports 12+ native Indian languages and regional dialects</span>
+                <span>Supports 22+ native Indian languages and regional dialects</span>
               </li>
               <li className="flex items-center gap-2">
                 <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />

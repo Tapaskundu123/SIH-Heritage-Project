@@ -13,6 +13,8 @@ import StatCard from '../../components/StatCard';
 import GlassCard from '../../components/GlassCard';
 import LoadingShimmer from '../../components/LoadingShimmer';
 import ProductCard from '../../components/ProductCard';
+import PipelineBanner from '../../components/PipelineBanner';
+import { useOnboardingPipeline } from '../../constants/pipeline';
 
 interface DashboardStats {
   totalProducts: number;
@@ -43,6 +45,7 @@ function getGreeting() {
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [user, setUser] = useState<{ name?: string; craftType?: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,11 +74,13 @@ export default function DashboardScreen() {
   const onRefresh = () => { setRefreshing(true); fetchStats(); };
 
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.saffron} />}
-    >
+    <View style={{ flex: 1, backgroundColor: Colors.bgDark }}>
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.saffron} />}
+        contentContainerStyle={{ paddingBottom: pipeline.isOnboarding && pipeline.step !== 'complete' ? 120 : 20 }}
+      >
       {/* Header */}
       <LinearGradient colors={['rgba(249,115,22,0.08)', 'transparent']} style={styles.headerGradient}>
         <View style={styles.header}>
@@ -91,6 +96,86 @@ export default function DashboardScreen() {
       </LinearGradient>
 
       <View style={styles.content}>
+        {/* Top Pipeline Card: Active step or New pipeline launcher */}
+        {pipeline.hydrated && pipeline.isOnboarding && pipeline.step !== 'complete' ? (
+          <TouchableOpacity
+            onPress={() => {
+              const routes: Record<string, string> = {
+                image: '/ai-studio', voice: '/voice-cataloger',
+                pricing: '/pricing', catalog: '/(tabs)/products/new',
+              };
+              router.push((routes[pipeline.step] || '/ai-studio') as any);
+            }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient
+              colors={['rgba(249,115,22,0.2)', 'rgba(99,102,241,0.08)']}
+              style={styles.pipelineCard}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.pipelineCardHeader}>
+                <View style={styles.pipelineLiveRow}>
+                  <View style={styles.pipelineDot} />
+                  <Text style={styles.pipelineLiveText}>SETUP PIPELINE ACTIVE</Text>
+                </View>
+                <Text style={styles.pipelineStepCount}>
+                  Step {pipeline.currentStepIndex + 1} of 4
+                </Text>
+              </View>
+              <Text style={styles.pipelineCardTitle}>
+                🚀 Step {pipeline.currentStepIndex + 1}: {['AI Photo Studio', 'Voice Cataloger', 'AI Pricing', 'Publish Product'][pipeline.currentStepIndex]}
+              </Text>
+              <Text style={styles.pipelineCardSub}>
+                {['Upload or capture product photo — AI enhances & removes background', 'Describe product specifications by speaking in your native language', 'Get AI price recommendation calculated from craft data', 'Review and publish your product live to marketplace'][pipeline.currentStepIndex]}
+              </Text>
+              <View style={styles.pipelineProgressRow}>
+                {[0, 1, 2, 3].map(i => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.pipelineDotStep,
+                      i < pipeline.currentStepIndex && styles.pipelineDotDone,
+                      i === pipeline.currentStepIndex && styles.pipelineDotActive,
+                    ]}
+                  />
+                ))}
+                <Text style={styles.pipelineGoText}>Open Step →</Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={async () => {
+              await pipeline.startOnboarding();
+              router.push('/ai-studio');
+            }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient
+              colors={['rgba(249,115,22,0.12)', 'rgba(249,115,22,0.03)']}
+              style={styles.pipelineCard}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.pipelineCardHeader}>
+                <View style={styles.pipelineLiveRow}>
+                  <Feather name="zap" size={12} color={Colors.saffron} />
+                  <Text style={styles.pipelineLiveText}>AI PRODUCT PIPELINE</Text>
+                </View>
+                <Text style={styles.pipelineStepCount}>4 Steps</Text>
+              </View>
+              <Text style={styles.pipelineCardTitle}>
+                ✨ Start New Listing Pipeline
+              </Text>
+              <Text style={styles.pipelineCardSub}>
+                1. AI Studio ➔ 2. Voice Cataloger ➔ 3. AI Pricing ➔ 4. Publish
+              </Text>
+              <View style={styles.pipelineProgressRow}>
+                <Text style={styles.pipelineGoText}>Launch Pipeline →</Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
         {/* Stat Cards */}
         <View style={styles.statsGrid}>
           {loading ? (
@@ -179,7 +264,6 @@ export default function DashboardScreen() {
           </>
         )}
 
-        {/* Empty state */}
         {!loading && stats?.totalProducts === 0 && (
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
@@ -196,7 +280,8 @@ export default function DashboardScreen() {
           </View>
         )}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -235,4 +320,22 @@ const styles = StyleSheet.create({
   emptyDesc: { fontSize: 13, color: Colors.textMuted, textAlign: 'center', fontFamily: Fonts.outfit, lineHeight: 20, marginBottom: 20 },
   emptyBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 24, borderRadius: Radius.lg },
   emptyBtnText: { color: '#fff', fontFamily: Fonts.outfitSemiBold, fontSize: 14 },
+  // Pipeline continue card styles
+  pipelineCard: {
+    borderRadius: Radius.xl, padding: Spacing.lg,
+    marginBottom: Spacing.md,
+    borderWidth: 1, borderColor: 'rgba(249,115,22,0.25)',
+  },
+  pipelineCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  pipelineLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pipelineDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: Colors.saffron },
+  pipelineLiveText: { fontSize: 9, fontFamily: Fonts.outfitBold, color: Colors.saffron, letterSpacing: 0.8 },
+  pipelineStepCount: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.outfitSemiBold },
+  pipelineCardTitle: { fontSize: 16, fontFamily: Fonts.outfitBold, color: Colors.textPrimary, marginBottom: 5 },
+  pipelineCardSub: { fontSize: 12, color: Colors.textMuted, fontFamily: Fonts.outfit, lineHeight: 18, marginBottom: 12 },
+  pipelineProgressRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  pipelineDotStep: { width: 22, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.1)' },
+  pipelineDotDone: { backgroundColor: Colors.emerald },
+  pipelineDotActive: { backgroundColor: Colors.saffron },
+  pipelineGoText: { marginLeft: 6, fontSize: 11, color: Colors.saffron, fontFamily: Fonts.outfitSemiBold },
 });

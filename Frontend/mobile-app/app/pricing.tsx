@@ -11,6 +11,7 @@ import { AI_URL } from '../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
+import { useOnboardingPipeline } from '../constants/pipeline';
 
 const CRAFT_TYPES = ['Pottery', 'Weaving', 'Embroidery', 'Wood Carving', 'Metal Work', 'Jewelry', 'Painting', 'Other'];
 
@@ -23,6 +24,7 @@ interface PriceResult {
 
 export default function PricingScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [form, setForm] = useState({ craftType: '', materials: '', craftingHours: '', region: '', description: '' });
   const [result, setResult] = useState<PriceResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,18 +38,40 @@ export default function PricingScreen() {
     }
     setLoading(true);
     try {
-      const res = await axios.post(`${AI_URL}/price-recommendation`, form, { timeout: 30000 });
-      setResult(res.data);
+      // ✅ FIXED: was /price-recommendation (non-existent). Correct endpoint:
+      const res = await axios.post(`${AI_URL}/ai/pricing/suggest`, {
+        category: form.craftType.toLowerCase().replace(' ', ''),
+        materials: form.materials ? form.materials.split(',').map(s => s.trim()) : [],
+        labor_hours: parseFloat(form.craftingHours) || 1,
+        region: form.region || 'default',
+      }, { timeout: 30000 });
+      const d = res.data;
+      const priceResult: PriceResult = {
+        recommended_price: d.suggested_price || d.recommended_price || 0,
+        price_range: { min: d.min_price || d.price_range?.min || 0, max: d.max_price || d.price_range?.max || 0 },
+        reasoning: d.reasoning || `Calculated from ${form.craftingHours}h labor + materials.`,
+        market_insights: d.market_insights || [],
+      };
+      setResult(priceResult);
+      // 🔗 Advance onboarding pipeline
+      if (pipeline.isOnboarding && pipeline.step === 'pricing') {
+        pipeline.completePricingStep({ recommended_price: priceResult.recommended_price, price_range: priceResult.price_range, reasoning: priceResult.reasoning });
+      }
     } catch {
       // Demo result
       const hrs = parseInt(form.craftingHours) || 10;
       const base = hrs * 120;
-      setResult({
+      const priceResult: PriceResult = {
         recommended_price: Math.round(base * 1.4),
         price_range: { min: Math.round(base * 1.1), max: Math.round(base * 1.8) },
         reasoning: `Based on ${hrs} hours of skilled craftsmanship, quality materials, and current market demand for ${form.craftType || 'handicrafts'}, we recommend this price point.`,
         market_insights: ['Regional artisan crafts are trending 23% higher', 'Export-quality items command a 40% premium', 'Online marketplaces prefer ₹500–₹5000 range for impulse purchases'],
-      });
+      };
+      setResult(priceResult);
+      // 🔗 Advance onboarding pipeline with demo result too
+      if (pipeline.isOnboarding && pipeline.step === 'pricing') {
+        pipeline.completePricingStep({ recommended_price: priceResult.recommended_price, price_range: priceResult.price_range });
+      }
     } finally {
       setLoading(false);
     }
@@ -160,6 +184,30 @@ export default function PricingScreen() {
                 ))}
               </GlassCard>
             )}
+
+            {/* Next step (onboarding) — Step 4: Create Product */}
+            {pipeline.isOnboarding && pipeline.step === 'catalog' && (
+              <TouchableOpacity
+                style={styles.nextStepCard}
+                onPress={() => router.push('/(tabs)/products/new')}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['rgba(245,158,11,0.18)', 'rgba(245,158,11,0.06)']}
+                  style={styles.nextStepGrad}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                >
+                  <View style={styles.nextStepIcon}>
+                    <Feather name="check-circle" size={18} color={Colors.emerald} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.nextStepLabel}>Price set! Final step: Create Product</Text>
+                    <Text style={styles.nextStepSub}>List your product on the marketplace → Step 4 of 4</Text>
+                  </View>
+                  <Feather name="arrow-right" size={18} color={Colors.amber} />
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
@@ -201,4 +249,10 @@ const styles = StyleSheet.create({
   insightRow: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'flex-start', marginTop: 8 },
   insightDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.saffron, marginTop: 6, flexShrink: 0 },
   insightText: { flex: 1, fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.outfit, lineHeight: 20 },
+  // Next step pipeline card
+  nextStepCard: { borderRadius: Radius.md, overflow: 'hidden', marginTop: Spacing.md },
+  nextStepGrad: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: Radius.md, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)' },
+  nextStepIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(16,185,129,0.15)', alignItems: 'center', justifyContent: 'center' },
+  nextStepLabel: { fontSize: 13, fontFamily: Fonts.outfitSemiBold, color: Colors.textPrimary, marginBottom: 2 },
+  nextStepSub: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.outfit },
 });

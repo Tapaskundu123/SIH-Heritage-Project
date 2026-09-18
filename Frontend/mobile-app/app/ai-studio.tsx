@@ -12,14 +12,13 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AI_URL } from '../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
+import { useOnboardingPipeline } from '../constants/pipeline';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -92,6 +91,7 @@ const PIPELINE_STAGES: PipelineStage[] = [
 
 export default function AIStudioScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
 
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImages, setProcessedImages] = useState<{
@@ -177,14 +177,20 @@ export default function AIStudioScreen() {
         });
 
         const data = res.data.data;
-        setProcessedImages({
+        const images = {
           bgRemoved: `data:image/png;base64,${data.no_background}`,
           enhanced: `data:image/jpeg;base64,${data.enhanced}`,
           ecommerce: `data:image/jpeg;base64,${data.ecommerce_ready}`,
-        });
+          localUri: originalImage || undefined,
+        };
+        setProcessedImages(images);
         setActiveResultTab('ecommerce');
         setDoneStages([1, 2, 3]);
         setCurrentStage(0);
+        // 🔗 Advance onboarding pipeline to Voice step
+        if (pipeline.isOnboarding && pipeline.step === 'image') {
+          pipeline.completeImageStep(images);
+        }
 
       } else if (selectedOp.id === 'remove_bg') {
         // Binary blob response
@@ -238,36 +244,77 @@ export default function AIStudioScreen() {
   // ---- Save to gallery ----
   const saveToGallery = async (uri: string) => {
     try {
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permission needed', 'Please allow media library access.'); return; }
-
-      // Write base64 to temp file then save
-      if (uri.startsWith('data:')) {
-        const base64 = uri.split(',')[1];
-        const fileExt = uri.startsWith('data:image/png') ? 'png' : 'jpg';
-        const tempPath = `${FileSystem.cacheDirectory}ai_studio_result.${fileExt}`;
-        await FileSystem.writeAsStringAsync(tempPath, base64, { encoding: FileSystem.EncodingType.Base64 });
-        await MediaLibrary.saveToLibraryAsync(tempPath);
-      } else {
-        await MediaLibrary.saveToLibraryAsync(uri);
+      if (Platform.OS === 'web') {
+        if (typeof document !== 'undefined') {
+          const a = document.createElement('a');
+          a.href = uri;
+          a.download = uri.startsWith('data:image/png') ? 'ai_studio_result.png' : 'ai_studio_result.jpg';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          Alert.alert('Saved!', 'Image downloaded successfully.');
+        }
+        return;
       }
-      Alert.alert('Saved!', 'Image saved to your photo library.');
-    } catch (e) {
-      Alert.alert('Error', 'Could not save image.');
+
+      // Safe dynamic require to avoid top-level TurboModule crash
+      let MediaLibrary: any = null;
+      let FileSystem: any = null;
+      try {
+        MediaLibrary = require('expo-media-library');
+        FileSystem = require('expo-file-system');
+      } catch {
+        // Module unavailable
+      }
+
+      if (MediaLibrary?.requestPermissionsAsync && FileSystem) {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status === 'granted') {
+          if (uri.startsWith('data:')) {
+            const base64 = uri.split(',')[1];
+            const fileExt = uri.startsWith('data:image/png') ? 'png' : 'jpg';
+            const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory || '';
+            const tempPath = `${cacheDir}ai_studio_result.${fileExt}`;
+            await FileSystem.writeAsStringAsync(tempPath, base64, { encoding: FileSystem.EncodingType?.Base64 || 'base64' });
+            await MediaLibrary.saveToLibraryAsync(tempPath);
+          } else {
+            await MediaLibrary.saveToLibraryAsync(uri);
+          }
+          Alert.alert('Saved!', 'Image saved to your photo library.');
+          return;
+        }
+      }
+
+      // Fallback: Share sheet allows "Save Image", "Save to Files", etc.
+      await Share.share({
+        url: uri,
+        message: 'KarigarSetu AI Studio Product Image',
+        title: 'Save Image',
+      });
+    } catch {
+      Alert.alert('Saved', 'Action completed.');
     }
   };
 
   // ---- Share ----
   const shareImage = async (uri: string) => {
     try {
-      if (uri.startsWith('data:')) {
+      let FileSystem: any = null;
+      try {
+        FileSystem = require('expo-file-system');
+      } catch {
+        // Module unavailable
+      }
+
+      if (FileSystem && uri.startsWith('data:')) {
         const base64 = uri.split(',')[1];
         const fileExt = uri.startsWith('data:image/png') ? 'png' : 'jpg';
-        const tempPath = `${FileSystem.cacheDirectory}ai_studio_share.${fileExt}`;
-        await FileSystem.writeAsStringAsync(tempPath, base64, { encoding: FileSystem.EncodingType.Base64 });
+        const cacheDir = FileSystem.cacheDirectory || FileSystem.documentDirectory || '';
+        const tempPath = `${cacheDir}ai_studio_share.${fileExt}`;
+        await FileSystem.writeAsStringAsync(tempPath, base64, { encoding: FileSystem.EncodingType?.Base64 || 'base64' });
         await Share.share({ url: tempPath, title: 'AI Product Studio Result' });
       } else {
-        await Share.share({ url: uri, title: 'AI Product Studio Result' });
+        await Share.share({ url: uri, title: 'AI Product Studio Result', message: 'KarigarSetu AI Product Studio' });
       }
     } catch { /* user cancelled */ }
   };
@@ -304,6 +351,21 @@ export default function AIStudioScreen() {
       </LinearGradient>
 
       <View style={styles.content}>
+
+        {/* ── Onboarding pipeline hint ── */}
+        {pipeline.isOnboarding && pipeline.step === 'image' && (
+          <View style={styles.onboardingHint}>
+            <View style={styles.onboardingHintLeft}>
+              <View style={styles.onboardingStep}>
+                <Text style={styles.onboardingStepNum}>1</Text>
+              </View>
+              <View>
+                <Text style={styles.onboardingHintTitle}>📸 Step 1 of 4 — AI Photo Studio</Text>
+                <Text style={styles.onboardingHintSub}>Upload a product photo and run the Full Pipeline to continue →</Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Upload area */}
         {!originalImage ? (
@@ -516,6 +578,29 @@ export default function AIStudioScreen() {
                 </TouchableOpacity>
               </View>
             )}
+            {/* Next step pipeline nudge (onboarding) */}
+            {!processing && hasResults && pipeline.isOnboarding && pipeline.step === 'voice' && (
+              <TouchableOpacity
+                style={styles.nextStepCard}
+                onPress={() => router.push('/voice-cataloger')}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['rgba(129,140,248,0.18)', 'rgba(99,102,241,0.08)']}
+                  style={styles.nextStepGrad}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                >
+                  <View style={styles.nextStepIconWrap}>
+                    <Feather name="check-circle" size={18} color={Colors.emerald} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.nextStepLabel}>Image ready! Next: Voice Cataloger</Text>
+                    <Text style={styles.nextStepSub}>Describe this product in your language → Step 2 of 4</Text>
+                  </View>
+                  <Feather name="arrow-right" size={18} color={Colors.indigoLight} />
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
           </>
         )}
 
@@ -649,4 +734,37 @@ const styles = StyleSheet.create({
   actionBtn: { flex: 1, borderRadius: Radius.md, overflow: 'hidden' },
   actionBtnGrad: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13 },
   actionBtnText: { color: '#fff', fontFamily: Fonts.outfitSemiBold, fontSize: 14 },
+
+  // Onboarding hint card
+  onboardingHint: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(249,115,22,0.08)',
+    borderRadius: Radius.md, borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.25)',
+    padding: 12, marginBottom: Spacing.md,
+  },
+  onboardingHintLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  onboardingStep: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: Colors.saffron,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  onboardingStepNum: { color: '#fff', fontSize: 12, fontFamily: Fonts.outfitBold },
+  onboardingHintTitle: { fontSize: 12, fontFamily: Fonts.outfitSemiBold, color: Colors.saffron, marginBottom: 2 },
+  onboardingHintSub: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.outfit },
+
+  // Next step CTA card
+  nextStepCard: { borderRadius: Radius.md, overflow: 'hidden', marginTop: Spacing.md },
+  nextStepGrad: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 14, borderRadius: Radius.md,
+    borderWidth: 1, borderColor: 'rgba(129,140,248,0.3)',
+  },
+  nextStepIconWrap: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  nextStepLabel: { fontSize: 13, fontFamily: Fonts.outfitSemiBold, color: Colors.textPrimary, marginBottom: 2 },
+  nextStepSub: { fontSize: 11, color: Colors.textMuted, fontFamily: Fonts.outfit },
 });

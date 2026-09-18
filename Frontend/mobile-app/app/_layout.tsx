@@ -5,6 +5,7 @@ import { useFonts, Outfit_400Regular, Outfit_500Medium, Outfit_600SemiBold, Outf
 import * as SplashScreen from 'expo-splash-screen';
 import { View } from 'react-native';
 import { Colors } from '../constants/theme';
+import PipelineBanner from '../components/PipelineBanner';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,7 +30,7 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar style="light" backgroundColor={Colors.bgDark} />
+      <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,
@@ -46,6 +47,7 @@ export default function RootLayout() {
         <Stack.Screen name="pricing" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="inventory" options={{ animation: 'slide_from_right' }} />
       </Stack>
+      <PipelineBanner />
     </>
   );
 }

@@ -4,7 +4,7 @@ import { View, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts } from '../../constants/theme';
 
-function TabIcon({ name, color, focused }: { name: string; color: string; focused: boolean }) {
+function TabIcon({ name, color, focused }: { name: string; color: any; focused: boolean }) {
   return (
     <View style={[styles.iconWrapper, focused && styles.iconActive]}>
       <Feather name={name as any} size={22} color={color} />

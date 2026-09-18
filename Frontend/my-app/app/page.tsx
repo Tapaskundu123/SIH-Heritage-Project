@@ -70,7 +70,7 @@ const FEATURES = [
 ];
 
 const STATS = [
-  { value: "12+", label: "Indian Languages", icon: Globe },
+  { value: "22+", label: "Indian Languages", icon: Globe },
   { value: "100%", label: "Authentic GI Crafts", icon: Shield },
   { value: "6", label: "Smart Business Tools", icon: Zap },
   { value: "0%", label: "Middleman Commission", icon: Award },

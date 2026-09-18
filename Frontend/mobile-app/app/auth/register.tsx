@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../../constants/theme';
 import GradientButton from '../../components/GradientButton';
+import { useOnboardingPipeline } from '../../constants/pipeline';
 
 const CRAFT_TYPES = [
   'Pottery', 'Weaving', 'Embroidery', 'Wood Carving', 'Metal Work',
@@ -20,6 +21,7 @@ const LANGUAGES = ['English', 'Hindi', 'Bengali', 'Tamil', 'Telugu', 'Marathi', 
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [form, setForm] = useState({ name: '', email: '', password: '', craftType: '', preferredLanguage: 'English', phone: '' });
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -43,7 +45,9 @@ export default function RegisterScreen() {
       if (res.data.success) {
         await AsyncStorage.setItem('ks_token', res.data.data.token);
         await AsyncStorage.setItem('ks_user', JSON.stringify(res.data.data.user));
-        router.replace('/(tabs)/dashboard');
+        // 🚀 Kick off the onboarding pipeline — navigate to Step 1 (AI Photo Studio)
+        await pipeline.startOnboarding();
+        router.replace('/ai-studio');
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message || 'Registration failed. Please try again.';

@@ -3,7 +3,7 @@ Voice Router — handles Audio → LOCAL IndicConformer 600M → Transcription �
 """
 import tempfile
 import os
-from fastapi import APIRouter, File, UploadFile, HTTPException, Request
+from fastapi import APIRouter, File, UploadFile, HTTPException, Request, Form
 from pydantic import BaseModel
 from loguru import logger
 
@@ -30,8 +30,11 @@ class ProcessTextRequest(BaseModel):
 async def transcribe_audio(
     request: Request,
     audio: UploadFile = File(...),
-    language: str | None = None,
+    language: str | None = Form(None),
 ):
+    # Support language from Form body or Query parameter (?language=bn)
+    if not language:
+        language = request.query_params.get("language")
     """
     Complete Voice-to-Product Pipeline:
     Audio

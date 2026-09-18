@@ -230,12 +230,17 @@ class IndicConformerService:
                     "Ensure weights are downloaded in AI/models/indicConfermer-voice-to-transcript."
                 )
 
-        target_lang = (language or "hi").lower().strip()
-        if target_lang not in self.SUPPORTED_LANGUAGES:
-            logger.warning(f"Language '{target_lang}' not directly mapped; defaulting to Hindi ('hi')")
+        is_auto_detect = not language or language.strip().lower() in ["", "auto", "none", "null"]
+        if not is_auto_detect:
+            target_lang = language.lower().strip().split("-")[0].split("_")[0]
+            if target_lang not in self.SUPPORTED_LANGUAGES:
+                logger.warning(f"Language '{language}' (normalized: '{target_lang}') not in supported list; defaulting to auto-detect")
+                is_auto_detect = True
+                target_lang = "hi"
+        else:
             target_lang = "hi"
 
-        logger.info(f"🎤 Transcribing with LOCAL IndicConformer 600M (Lang: {target_lang} - {self.SUPPORTED_LANGUAGES.get(target_lang)})...")
+        logger.info(f"🎤 Transcribing with LOCAL IndicConformer 600M (Mode: {'Auto-Detect' if is_auto_detect else target_lang})...")
 
         try:
             # 1. Read and preprocess audio to 16kHz mono tensor
@@ -267,7 +272,25 @@ class IndicConformerService:
                 {"encoder_output": encoder_outputs}
             )[0]
 
-            # 5. Language-specific CTC decoding
+            # 5. Language-specific CTC decoding with auto-detection if language not fixed
+            if is_auto_detect:
+                best_lang = "hi"
+                best_score = -999999.0
+                test_langs = [l for l in ["hi", "bn", "ta", "te", "mr", "gu", "pa", "kn", "ml", "or", "as", "ur"] if l in self.language_masks]
+                for l in test_langs:
+                    m = self.language_masks[l]
+                    lp_m = torch.from_numpy(logprobs[:, :, m]).log_softmax(dim=-1)
+                    max_lp, argm = torch.max(lp_m[0], dim=-1)
+                    non_blank = (argm != self.blank_id)
+                    count = non_blank.sum().item()
+                    if count > 2:
+                        score = max_lp[non_blank].mean().item() + (count ** 0.5)
+                        if score > best_score:
+                            best_score = score
+                            best_lang = l
+                target_lang = best_lang
+                logger.info(f"🔍 Multilingual Auto-Detected language: '{target_lang}' ({self.SUPPORTED_LANGUAGES.get(target_lang, 'Indic')})")
+
             mask = self.language_masks[target_lang]
             logprobs_masked = torch.from_numpy(logprobs[:, :, mask]).log_softmax(dim=-1)
 
@@ -278,7 +301,7 @@ class IndicConformerService:
                 [self.vocab[target_lang][idx.item()] for idx in collapsed_indices if idx.item() != self.blank_id]
             ).replace("\u2581", " ").strip()
 
-            logger.success(f"✅ Local IndicConformer transcribed: '{transcription}'")
+            logger.success(f"✅ Local IndicConformer transcribed ({target_lang}): '{transcription}'")
 
             return {
                 "text": transcription,

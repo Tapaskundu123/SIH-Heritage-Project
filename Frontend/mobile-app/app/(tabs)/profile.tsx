@@ -130,7 +130,7 @@ export default function ProfileScreen() {
             AI-powered platform empowering Indian artisans with voice cataloging, smart pricing, and direct B2B connections. Built with ❤️ for India's craft heritage.
           </Text>
           <View style={styles.techBadges}>
-            {['12+ Languages', 'Local AI', 'CUDA Powered', 'Offline Ready'].map((t) => (
+            {['22+ Languages', 'Local AI', 'CUDA Powered', 'Offline Ready'].map((t) => (
               <View key={t} style={styles.techBadge}><Text style={styles.techBadgeText}>{t}</Text></View>
             ))}
           </View>

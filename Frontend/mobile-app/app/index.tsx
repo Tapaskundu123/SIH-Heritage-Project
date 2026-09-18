@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
+import { useOnboardingPipeline } from '../constants/pipeline';
 
 const { width } = Dimensions.get('window');
 
@@ -28,7 +29,7 @@ const FEATURES = [
 ];
 
 const STATS = [
-  { value: '12+', label: 'Indian Languages', icon: 'globe' },
+  { value: '22+', label: 'Indian Languages', icon: 'globe' },
   { value: '6', label: 'AI Modules', icon: 'zap' },
   { value: '100%', label: 'Local AI', icon: 'shield' },
   { value: '∞', label: 'Scale', icon: 'trending-up' },
@@ -36,6 +37,7 @@ const STATS = [
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [textIdx, setTextIdx] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const heroAnim = useRef(new Animated.Value(0)).current;
@@ -107,6 +109,56 @@ export default function WelcomeScreen() {
           <Text style={styles.subtitle}>
             Empowering artisans with AI voice cataloging, smart pricing, and direct B2B connections.
           </Text>
+
+          {/* Direct Pipeline Launcher */}
+          <TouchableOpacity
+            style={styles.pipelineHeroCard}
+            onPress={async () => {
+              await pipeline.startOnboarding();
+              router.push('/ai-studio');
+            }}
+            activeOpacity={0.88}
+          >
+            <LinearGradient
+              colors={['rgba(249,115,22,0.22)', 'rgba(99,102,241,0.12)']}
+              style={styles.pipelineHeroGrad}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.pipelineHeroHeader}>
+                <View style={styles.pipelineLiveTag}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.pipelineLiveTagText}>FULL AI PIPELINE</Text>
+                </View>
+                <View style={styles.startTag}>
+                  <Text style={styles.startTagText}>Start with Studio →</Text>
+                </View>
+              </View>
+              <Text style={styles.pipelineHeroTitle}>
+                Launch Full Listing Pipeline
+              </Text>
+              <Text style={styles.pipelineHeroSub}>
+                1. AI Photo Studio ➔ 2. Voice Cataloger ➔ 3. AI Pricing ➔ 4. Product Catalog
+              </Text>
+              <View style={styles.heroStepPills}>
+                <View style={[styles.heroPill, { borderColor: `${Colors.saffron}60` }]}>
+                  <Text style={[styles.heroPillText, { color: Colors.saffron }]}>1. 📸 Photo Studio</Text>
+                </View>
+                <Feather name="chevron-right" size={12} color={Colors.textDim} />
+                <View style={styles.heroPill}>
+                  <Text style={styles.heroPillText}>2. 🎙️ Voice</Text>
+                </View>
+                <Feather name="chevron-right" size={12} color={Colors.textDim} />
+                <View style={styles.heroPill}>
+                  <Text style={styles.heroPillText}>3. 💰 Price</Text>
+                </View>
+                <Feather name="chevron-right" size={12} color={Colors.textDim} />
+                <View style={styles.heroPill}>
+                  <Text style={styles.heroPillText}>4. 📦 Catalog</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
 
           {/* CTA Buttons */}
           <View style={styles.ctaRow}>
@@ -211,4 +263,91 @@ const styles = StyleSheet.create({
   bottomCta: { padding: Spacing.xl, alignItems: 'center' },
   bottomCtaTitle: { fontSize: 20, fontFamily: Fonts.outfitBold, color: Colors.textPrimary, textAlign: 'center', marginBottom: 8 },
   bottomCtaSubtitle: { fontSize: 13, color: Colors.textMuted, fontFamily: Fonts.outfit, textAlign: 'center', marginBottom: Spacing.lg },
+
+  // Pipeline Hero Card
+  pipelineHeroCard: {
+    borderRadius: Radius.xl,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'rgba(249,115,22,0.4)',
+    marginBottom: Spacing.lg,
+    shadowColor: Colors.saffron,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  pipelineHeroGrad: {
+    padding: Spacing.md,
+  },
+  pipelineHeroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  pipelineLiveTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(249,115,22,0.18)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.saffron,
+  },
+  pipelineLiveTagText: {
+    fontSize: 9,
+    fontFamily: Fonts.outfitBold,
+    color: Colors.saffron,
+    letterSpacing: 0.8,
+  },
+  startTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  startTagText: {
+    fontSize: 11,
+    fontFamily: Fonts.outfitBold,
+    color: Colors.saffron,
+  },
+  pipelineHeroTitle: {
+    fontSize: 16,
+    fontFamily: Fonts.outfitBold,
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  pipelineHeroSub: {
+    fontSize: 11,
+    fontFamily: Fonts.outfit,
+    color: Colors.textMuted,
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  heroStepPills: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+  },
+  heroPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  heroPillText: {
+    fontSize: 10,
+    fontFamily: Fonts.outfitSemiBold,
+    color: Colors.textDim,
+  },
 });

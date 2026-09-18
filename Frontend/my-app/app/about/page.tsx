@@ -110,7 +110,7 @@ export default function AboutPage() {
             </div>
 
             <div className="glass-card p-6 border border-white/10 space-y-2">
-              <div className="text-3xl font-black text-emerald-400" style={{ fontFamily: "Outfit" }}>12+</div>
+              <div className="text-3xl font-black text-emerald-400" style={{ fontFamily: "Outfit" }}>22+</div>
               <div className="text-xs font-bold text-white">Indian Languages</div>
               <p className="text-[11px] text-stone-400">Artisans speak naturally in their native mother tongue.</p>
             </div>

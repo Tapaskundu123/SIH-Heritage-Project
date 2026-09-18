@@ -22,9 +22,14 @@ export const transcribeVoice = async (req: Request, res: Response): Promise<void
       contentType: req.file.mimetype,
     });
 
-    const response = await axios.post(`${AI_BASE}/ai/voice/transcribe`, form, {
+    const lang = req.body?.language || req.query?.language;
+    const url = lang
+      ? `${AI_BASE}/ai/voice/transcribe?language=${encodeURIComponent(String(lang))}`
+      : `${AI_BASE}/ai/voice/transcribe`;
+
+    const response = await axios.post(url, form, {
       headers: form.getHeaders(),
-      timeout: 60000,
+      timeout: 120000,
     });
 
     // Clean up temp file
@@ -33,12 +38,13 @@ export const transcribeVoice = async (req: Request, res: Response): Promise<void
     }
 
     res.json({ success: true, data: response.data });
-  } catch (error) {
-    console.error('Voice transcription error:', error);
+  } catch (error: any) {
+    console.error('Voice transcription error:', error?.response?.data || error?.message || error);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    res.status(500).json({ success: false, message: 'Voice transcription failed' });
+    const errMsg = error?.response?.data?.detail || error?.response?.data?.message || error?.message || 'Voice transcription failed';
+    res.status(500).json({ success: false, message: errMsg });
   }
 };
 

@@ -10,9 +10,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../../constants/theme';
 import GradientButton from '../../components/GradientButton';
+import { useOnboardingPipeline } from '../../constants/pipeline';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const pipeline = useOnboardingPipeline();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -29,7 +31,9 @@ export default function LoginScreen() {
       if (res.data.success) {
         await AsyncStorage.setItem('ks_token', res.data.data.token);
         await AsyncStorage.setItem('ks_user', JSON.stringify(res.data.data.user));
-        router.replace('/(tabs)/dashboard');
+        // Start full onboarding pipeline starting at AI Studio (Step 1)
+        await pipeline.startOnboarding();
+        router.replace('/ai-studio');
       }
     } catch (err: any) {
       const msg = err?.response?.data?.message || 'Login failed. Please check your credentials.';
