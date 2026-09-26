@@ -16,29 +16,44 @@ from services.gpu_manager import release_gpu
 QWEN_LONG_SPECS_SYSTEM_PROMPT = """You are a premier Indian handicraft e-commerce cataloger for KarigarSetu.
 Your job is to transform an artisan's voice or text description into rich, long, professional marketplace product specifications.
 
+CRITICAL RULES (NEVER violate these):
+1. The product "name" in English MUST be a short, elegant e-commerce title (5-10 words max). It must NEVER be a sentence, a translation, or a copy of the user's voice transcript.
+2. The "name_hindi" MUST be a concise, attractive Hindi product title (5-10 words max). It must NEVER copy or transliterate the raw Hindi transcript.
+3. Both titles should be constructed from the craft TYPE, TECHNIQUE, and REGION — not from what the artisan literally said.
+4. The descriptions (description_en and description_hi) must be complete, professional marketing prose — no mixing of Hindi and English in the same field.
+5. Return ONLY valid JSON. No markdown, no code fences, no explanatory text.
+
+Good title examples:
+  name: "Authentic Madhubani Folk Art Painting — Bihar Heritage"
+  name_hindi: "मधुबनी लोक चित्रकला — बिहार की पारंपरिक हस्तकला"
+
+Bad title examples (FORBIDDEN):
+  name: "यह एक मधुबनी पेंटिंग है जिसे बनाने में दो दिन लगा" ← raw transcript, forbidden!
+  name_hindi: "यह एक मधुबनी पेंटिंग है जिसे बनाने में दो दिन लगा" ← same raw text, forbidden!
+
 Analyze the description and produce a comprehensive, authentic catalog entry celebrating Indian heritage.
 
-Return ONLY a valid, parseable JSON object with EXACTLY this structure (no markdown formatting, no comments, just pure JSON):
+Return ONLY a valid, parseable JSON object with EXACTLY this structure:
 {
-  "name": "Detailed, elegant product title in English (e.g., Handcrafted Kashmiri Walnut Wood Keepsake Box with Chinar Leaf Inlay)",
-  "name_hindi": "उत्पाद का आकर्षक शीर्षक हिंदी में (जैसे: हस्तनिर्मित कश्मीरी अखरोट की लकड़ी का नक्काशीदार संदूक)",
+  "name": "Elegant 5-10 word English product title using craft type and region (NEVER a transcript sentence)",
+  "name_hindi": "संक्षिप्त 5-10 शब्दों का हिंदी शीर्षक — शिल्प प्रकार और क्षेत्र आधारित",
   "category": "woodwork",
-  "craft_technique": "Authentic regional technique (e.g., Khatamband, Dokra lost-wax casting, Jaipur Blue Pottery, Chanderi handloom)",
-  "origin_region": "State / Region of heritage origin (e.g., Kashmir, Rajasthan, West Bengal, Odisha, Uttar Pradesh)",
+  "craft_technique": "Authentic regional technique (e.g., Khatamband, Dokra, Jaipur Blue Pottery, Chanderi handloom)",
+  "origin_region": "State / Region of heritage origin (e.g., Kashmir, Rajasthan, West Bengal, Odisha, Bihar)",
   "materials": ["List of raw materials (e.g., Seasoned Walnut Wood, Natural Beeswax Polish, Brass Hinges)"],
   "colors": ["Primary and accent colors"],
-  "dimensions": "Dimensions in cm/inches (e.g., 8 x 5 x 3.5 inches) or standard artisan size",
+  "dimensions": "Dimensions or standard artisan size",
   "price_hint": 1500,
-  "tags": ["6 to 8 relevant search tags, e.g., kashmiri woodwork, handmade box, artisan decor, walnut wood, traditional craft"],
+  "tags": ["6 to 8 relevant search tags"],
   "key_features": [
-    "100% Hand-carved by master Indian generational artisans",
-    "Detailed floral motifs inspired by traditional motifs",
-    "Eco-friendly natural wax finish protecting the wood grain",
+    "100% Hand-crafted by master Indian generational artisans",
+    "Detailed motifs inspired by traditional folk art",
+    "Eco-friendly natural materials",
     "Direct artisan support and fair trade certified"
   ],
-  "description_en": "A rich 3 to 5 sentence story-driven product description in English celebrating the artisan heritage, craftsmanship, durability, and cultural significance. Explain why this handcrafted piece is unique and how it adds elegance to any modern or traditional home.",
-  "description_hi": "3 से 5 वाक्यों में शिल्प, परंपरा और कारीगर की मेहनत को रेखांकित करता हुआ विस्तृत हिंदी विवरण।",
-  "care_instructions": "Wipe with a soft dry cloth. Keep away from direct water or extreme heat to preserve natural finish."
+  "description_en": "A rich 3 to 5 sentence story-driven product description in ENGLISH ONLY. Celebrate the artisan heritage, craftsmanship, durability, and cultural significance. Do NOT include any Hindi text here.",
+  "description_hi": "3 से 5 वाक्यों में शिल्प, परंपरा और कारीगर की मेहनत को रेखांकित करता हुआ विस्तृत हिंदी विवरण। यहाँ केवल हिंदी भाषा में लिखें, अंग्रेजी नहीं।",
+  "care_instructions": "Wipe with a soft dry cloth. Keep away from direct water or extreme heat."
 }
 
 Valid categories: ["textiles", "pottery", "jewelry", "woodwork", "metalwork", "paintings", "leather", "bamboo", "stone", "other"]
@@ -179,7 +194,7 @@ class QwenExtractionService:
             with torch.no_grad():
                 generated_ids = model.generate(
                     **model_inputs,
-                    max_new_tokens=450,
+                    max_new_tokens=600,
                     temperature=0.2,
                     do_sample=True,
                     pad_token_id=tokenizer.eos_token_id,
@@ -211,9 +226,15 @@ class QwenExtractionService:
         2. Hugging Face Cloud API (if token present and local offline not ready)
         3. Intelligent Rule-Based Engine (Instant 0 MB VRAM fallback)
         """
-        user_prompt = f"Artisan Product Description:\nEnglish: {text_en}\n"
+        user_prompt = (
+            f"Please generate a complete, professional product catalog entry for this Indian handicraft.\n"
+            f"The artisan described their product (translated to English and Hindi below).\n"
+            f"IMPORTANT: Do NOT copy the transcript text as the product title — instead derive an elegant, \n"
+            f"concise commercial title from the craft type, technique, and region you detect.\n\n"
+            f"English description: {text_en}\n"
+        )
         if text_hi:
-            user_prompt += f"Hindi: {text_hi}\n"
+            user_prompt += f"Hindi description: {text_hi}\n"
 
         # Attempt 1: Local Offline Sequential Execution
         if self.use_local and self.is_local_available():
@@ -418,30 +439,71 @@ class QwenExtractionService:
         if not colors:
             colors = ["Natural Artisan Finish"]
 
-        # Formulate rich titles
-        name_en = text_en.strip().split(".")[0].strip()
-        if len(name_en) > 80:
-            name_en = name_en[:77] + "..."
-        if not name_en or len(name_en) < 10:
-            name_en = f"Authentic Handcrafted {technique}"
+        # ── Construct proper product titles from structured metadata ─────────────
+        # NEVER use raw transcript/translation text as a title.
+        # Build professional English title from: technique + region + category adjective
+        CATEGORY_ADJECTIVE: dict[str, str] = {
+            "paintings":  "Traditional Painting",
+            "textiles":   "Handwoven Textile",
+            "pottery":    "Handcrafted Pottery",
+            "woodwork":   "Hand-Carved Wooden Artefact",
+            "metalwork":  "Hand-Cast Metal Artefact",
+            "jewelry":    "Handcrafted Jewellery",
+            "leather":    "Artisan Leather Craft",
+            "bamboo":     "Handwoven Bamboo Craft",
+            "stone":      "Hand-Carved Stone Artefact",
+            "other":      "Handcrafted Heritage Artefact",
+        }
+        cat_adj = CATEGORY_ADJECTIVE.get(category, "Handcrafted Heritage Artefact")
 
-        name_hi = text_hi.strip().split("।")[0].strip() if text_hi else f"हस्तनिर्मित {name_en}"
-        if len(name_hi) > 80:
-            name_hi = name_hi[:77] + "..."
+        # English: "Authentic <Technique> — <Category Adjective> from <Region>"
+        name_en = f"Authentic {technique} — {cat_adj} from {origin_region}"
 
-        # Formulate rich long description
+        # Hindi title lookup map for known techniques
+        TECHNIQUE_HINDI: dict[str, str] = {
+            "Mithila / Madhubani Folk Art":         "मधुबनी लोक चित्रकला",
+            "Warli Tribal Art":                      "वारली जनजातीय चित्रकला",
+            "Pattachitra Traditional Scroll Art":    "पट्टचित्र पारंपरिक चित्रकला",
+            "Kashmiri Hand Carving":                 "कश्मीरी हस्तनिर्मित नक्काशी",
+            "Traditional Handloom Weaving":          "पारंपरिक हाथकरघा बुनाई",
+            "Dhokra Lost-Wax Metal Casting":         "ढोकरा धातु शिल्प",
+            "Wheel-Thrown Glazed Pottery":           "हस्तनिर्मित मिट्टी के बर्तन",
+            "Hand Needlework Embroidery":            "हस्तनिर्मित कढ़ाई कला",
+            "Traditional Handcrafted Technique":     "पारंपरिक हस्तशिल्प",
+        }
+        REGION_HINDI: dict[str, str] = {
+            "Bihar":          "बिहार",
+            "Maharashtra":    "महाराष्ट्र",
+            "Odisha / West Bengal": "उड़ीसा / पश्चिम बंगाल",
+            "Kashmir":        "कश्मीर",
+            "Rajasthan":      "राजस्थान",
+            "Uttar Pradesh":  "उत्तर प्रदेश",
+            "Odisha":         "उड़ीसा",
+            "India":          "भारत",
+        }
+        tech_hi  = TECHNIQUE_HINDI.get(technique, f"{technique}")
+        region_hi = REGION_HINDI.get(origin_region, origin_region)
+        name_hi = f"{tech_hi} — {region_hi} की पारंपरिक हस्तकला"
+
+        # ── Construct clean, well-structured descriptions ─────────────────────
+        mat_str = ', '.join(materials) if materials else 'locally sourced natural materials'
+        color_str = ', '.join(colors) if colors else 'rich artisan hues'
+
         desc_en = (
-            f"{name_en} is an authentic piece of Indian heritage art from {origin_region}, "
-            f"skillfully handcrafted using {technique.lower()}. Each motif and detail reflects centuries-old "
-            f"generational knowledge passed down through regional artisan families. Made with "
-            f"{', '.join(materials) if materials else 'locally sourced natural materials'}, this piece brings "
-            f"cultural soul, artistic elegance, and timeless charm to any living space."
+            f"This exquisite piece of {technique} from {origin_region} is a testament to India's rich "
+            f"living heritage. Meticulously handcrafted by generational artisans using {mat_str}, "
+            f"every line, motif, and colour tells a story of cultural pride and ancestral skill. "
+            f"The work features {color_str} tones that reflect the vibrant aesthetics of {origin_region}. "
+            f"A perfect collector's item and a meaningful gift, this artefact directly supports the "
+            f"livelihoods of rural artisan communities across India."
         )
 
         desc_hi = (
-            f"यह {name_hi} {origin_region} की पारंपरिक विरासत और शिल्प कौशल का अनुपम उदाहरण है, "
-            f"जिसे कुशल कारीगरों द्वारा {technique} से हाथ से तैयार किया गया है। "
-            f"यह उत्पाद आपकी कलात्मक पसंद, सात्विक जीवनशैली और भारतीय संस्कृति का प्रतिनिधित्व करता है।"
+            f"यह {tech_hi} {region_hi} की सदियों पुरानी शिल्प परंपरा का जीवंत उदाहरण है। "
+            f"कुशल कारीगरों ने {mat_str} का उपयोग करके इसे पूर्णतः हाथ से तैयार किया है। "
+            f"इस कृति में {color_str} रंगों का सुंदर संयोजन इसे और भी अनमोल बनाता है। "
+            f"यह उत्पाद न केवल आपके घर को सजाएगा, बल्कि भारतीय ग्रामीण कारीगरों की आजीविका को "
+            f"भी सीधे सहयोग देगा।"
         )
 
         tags = [category, technique.lower().replace(" ", "-"), "handcrafted", "artisan-made", "made-in-india", "authentic-craft"]
@@ -462,15 +524,15 @@ class QwenExtractionService:
             "suggestedPrice": suggested_price,
             "tags": tags,
             "key_features": [
-                f"100% Handcrafted by authentic artisans from {origin_region}",
-                f"Crafted using traditional {technique}",
-                "Natural materials with authentic traditional finish",
+                f"100% Handcrafted by authentic {origin_region} artisans using {technique}",
+                f"Made with {mat_str} — traditional and eco-friendly",
+                "Every piece is unique — no two artefacts are identical",
                 "Direct fair-trade purchase supporting artisan livelihoods"
             ],
             "description_en": desc_en,
             "description_hi": desc_hi,
             "care_instructions": "Dust gently with a clean, soft dry cloth. Avoid direct water or harsh sunlight.",
-            "ai_engine": "Qwen2.5-3B-Instruct (Smart Spec Engine)"
+            "ai_engine": "KarigarSetu Smart Spec Engine (Heritage)"
         }
 
     def _clean_json(self, raw_text: str) -> dict | None:

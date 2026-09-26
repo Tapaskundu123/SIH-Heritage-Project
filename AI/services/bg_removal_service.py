@@ -266,3 +266,10 @@ class BGRemovalService:
         Returns RGBA PIL Image.
         """
         return _remove_background_pil(image)
+
+
+def remove_background(image: Image.Image) -> Image.Image:
+    """
+    PIL -> PIL convenience function for background removal.
+    """
+    return _remove_background_pil(image)

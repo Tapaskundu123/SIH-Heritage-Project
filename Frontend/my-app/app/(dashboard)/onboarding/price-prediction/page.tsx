@@ -12,7 +12,9 @@ import {
 import { useOnboardingPipeline, PredictedPrice } from "../../../hooks/use-onboarding-pipeline";
 import OnboardingPipelineBanner from "../../../components/onboarding-pipeline-banner";
 
-const AI_BASE = process.env.NEXT_PUBLIC_AI_URL || "http://localhost:8000";
+const AI_BASE =
+  process.env.NEXT_PUBLIC_AI_URL?.replace("localhost", "127.0.0.1") ||
+  "http://127.0.0.1:8000";
 
 // ─── Processing stages for SigLIP + TabPFN pipeline animation ────────────────
 const MODEL_STAGES = [
@@ -58,27 +60,105 @@ export default function PricePredictionPage() {
   const [creatingProduct, setCreatingProduct] = useState(false);
   const [productCreated, setProductCreated] = useState(false);
 
-  // Guard: redirect if pipeline data is missing
+  // Manual fallback form (used when no pipeline data is available)
+  const [manualForm, setManualForm] = useState({
+    category: "paintings",
+    materialCost: "",
+    laborHours: "",
+    region: "Bihar",
+    quality: "standard",
+  });
+  const [isManualMode, setIsManualMode] = useState(false);
+
+  // Detect manual mode when no pipeline state is available
   useEffect(() => {
     if (!pipeline.hydrated) return;
-    if (!pipeline.isOnboarding) {
-      router.replace("/dashboard");
+    if (!pipeline.isOnboarding || (!pipeline.studioImages && !pipeline.voiceSpecs)) {
+      setIsManualMode(true);
     }
-  }, [pipeline.hydrated, pipeline.isOnboarding, router]);
+  }, [pipeline.hydrated, pipeline.isOnboarding, pipeline.studioImages, pipeline.voiceSpecs]);
 
   const { studioImages, voiceSpecs } = pipeline;
 
   // ── Run SigLIP + TabPFN prediction ─────────────────────────────────────────
   const runPricePrediction = async () => {
-    if (!studioImages?.ecommerce || !voiceSpecs) return;
     setLoading(true);
     setError("");
     setModelProgress({ stage: 1, done: [] });
 
-    try {
-      const stageDelay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const stageDelay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-      // Convert base64 ecommerce image to blob
+    // ── Manual mode: use form inputs directly ────────────────────────────────
+    if (isManualMode || !studioImages?.ecommerce || !voiceSpecs) {
+      try {
+        const token = localStorage.getItem("ks_token");
+        const materialCost = Number(manualForm.materialCost) || 0;
+        const laborCost = (Number(manualForm.laborHours) || 0) * 80;
+
+        await stageDelay(1000);
+        setModelProgress({ stage: 2, done: [1] });
+        await stageDelay(800);
+        setModelProgress({ stage: 3, done: [1, 2] });
+
+        try {
+          const res = await axios.post(`http://localhost:5000/api/pricing/suggest`, {
+            category: manualForm.category,
+            materialCost: materialCost,
+            laborHours: Number(manualForm.laborHours) || 1,
+            region: manualForm.region,
+            quality: manualForm.quality,
+            has_gi_tag: false,
+          }, { headers: { Authorization: `Bearer ${token}` } });
+
+          if (res.data?.success && res.data?.data) {
+            const d = res.data.data;
+            const suggested = Number(d.suggestedPrice ?? d.suggested_price) || 0;
+            const low = Number(d.minPrice ?? d.min_price) || Math.round((suggested || 2500) * 0.75);
+            const high = Number(d.maxPrice ?? d.max_price) || Math.round((suggested || 2500) * 1.35);
+            const finalPrice = suggested || Math.round((low + high) / 2) || 2500;
+
+            const fallback: PredictedPrice = {
+              predicted_price: finalPrice,
+              confidence_low: low,
+              confidence_high: high,
+              reasoning: Array.isArray(d.insights) && d.insights.length > 0
+                ? d.insights.join(" ")
+                : "AI pricing based on material cost, labour, region, and category benchmarks.",
+              model: "Dynamic Pricing Engine",
+            };
+            setModelProgress({ stage: 0, done: [1, 2, 3] });
+            setResult(fallback);
+            setLoading(false);
+            return;
+          }
+        } catch { /* fall through to local estimate */ }
+
+        // Local estimate fallback
+        const overhead = (materialCost + laborCost) * 0.15;
+        const base = materialCost + laborCost + overhead;
+        const price = Math.ceil(base * 2.5 * 1.3);
+        const finalPrice = price > 0 ? price : 2500;
+        const low = base > 0 ? Math.ceil(base * 1.2) : 1800;
+        const high = price > 0 ? Math.ceil(price * 1.3) : 3500;
+        const fallback: PredictedPrice = {
+          predicted_price: finalPrice,
+          confidence_low: low,
+          confidence_high: high,
+          reasoning: `Estimated price based on ₹${materialCost} material cost, ${manualForm.laborHours || 1}h labour in ${manualForm.region} for ${manualForm.category} craft (${manualForm.quality} quality).`,
+          model: "Local Estimate",
+        };
+        setModelProgress({ stage: 0, done: [1, 2, 3] });
+        setResult(fallback);
+      } catch (err: any) {
+        setError("Price prediction failed. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // ── Pipeline mode: SigLIP + TabPFN ──────────────────────────────────────
+    try {
       const b64 = studioImages.ecommerce.replace(/^data:image\/\w+;base64,/, "");
       const byteArray = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const imageBlob = new Blob([byteArray], { type: "image/jpeg" });
@@ -104,18 +184,32 @@ export default function PricePredictionPage() {
       setModelProgress({ stage: 3, done: [1, 2] });
 
       const res = await promise;
-      const data = res.data.data as PredictedPrice;
+      const raw = res.data?.data;
+      const pPrice = Number(raw?.predicted_price ?? raw?.suggestedPrice ?? raw?.suggested_price) || 2500;
+      const cLow = Number(raw?.confidence_low ?? raw?.minPrice ?? raw?.min_price) || Math.round(pPrice * 0.8);
+      const cHigh = Number(raw?.confidence_high ?? raw?.maxPrice ?? raw?.max_price) || Math.round(pPrice * 1.3);
+
+      const data: PredictedPrice = {
+        predicted_price: pPrice,
+        confidence_low: cLow,
+        confidence_high: cHigh,
+        reasoning: raw?.reasoning || "Multimodal SigLIP vision encoding + TabPFN craft pricing regression.",
+        model: raw?.model || "SigLIP-768 + TabPFN",
+      };
 
       setModelProgress({ stage: 0, done: [1, 2, 3] });
       setResult(data);
       pipeline.completePricingStep(data);
     } catch (err: any) {
       // Fallback: use voice hint or generate estimate
-      const hint = voiceSpecs?.price_hint;
+      const hint = Number(voiceSpecs?.price_hint) || 0;
+      const pPrice = hint > 0 ? Math.round(hint * 1.15) : 2500;
+      const cLow = hint > 0 ? Math.round(hint * 0.8) : 1800;
+      const cHigh = hint > 0 ? Math.round(hint * 1.5) : 3500;
       const fallback: PredictedPrice = {
-        predicted_price: hint ? Math.round(hint * 1.15) : 2500,
-        confidence_low: hint ? Math.round(hint * 0.8) : 1800,
-        confidence_high: hint ? Math.round(hint * 1.5) : 3500,
+        predicted_price: pPrice,
+        confidence_low: cLow,
+        confidence_high: cHigh,
         reasoning: "Estimated based on product category, materials, and craft technique. SigLIP service may not be available; connect AI service for multimodal prediction.",
         model: "Fallback Estimator",
       };
@@ -163,10 +257,10 @@ export default function PricePredictionPage() {
         materials,
         tags,
         craftTechnique: voiceSpecs.craftTechnique,
-        price: result.predicted_price,
-        pricingConfidenceLow: result.confidence_low,
-        pricingConfidenceHigh: result.confidence_high,
-        aiPricingModel: result.model,
+        price: Number(result.predicted_price) || 2500,
+        pricingConfidenceLow: Number(result.confidence_low) || 1800,
+        pricingConfidenceHigh: Number(result.confidence_high) || 3500,
+        aiPricingModel: result.model || "Dynamic Pricing Engine",
         isAIGenerated: true,
         voiceTranscript: voiceSpecs.transcript,
         detectedLanguage: voiceSpecs.detectedLanguage,
@@ -415,11 +509,88 @@ export default function PricePredictionPage() {
         </div>
       )}
 
-      {/* ── Run prediction button ── */}
+      {/* ── Manual form (shown when no pipeline data) ── */}
+      {isManualMode && !loading && !result && (
+        <div className="glass-card p-5 space-y-4">
+          <p style={{ fontSize: 11, fontFamily: "Outfit", fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+            📋 Enter Product Details
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label style={{ fontSize: 11, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600, display: "block", marginBottom: 4 }}>Category</label>
+              <select
+                className="input-dark"
+                value={manualForm.category}
+                onChange={(e) => setManualForm({ ...manualForm, category: e.target.value })}
+              >
+                {["textiles","pottery","jewelry","woodwork","metalwork","paintings","leather","bamboo","stone","other"].map((c) => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600, display: "block", marginBottom: 4 }}>Region</label>
+              <select
+                className="input-dark"
+                value={manualForm.region}
+                onChange={(e) => setManualForm({ ...manualForm, region: e.target.value })}
+              >
+                {["Rajasthan","Gujarat","West Bengal","Tamil Nadu","Uttar Pradesh","Maharashtra","Odisha","Bihar","Madhya Pradesh","Karnataka","Assam","Other"].map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600, display: "block", marginBottom: 4 }}>Material Cost (₹)</label>
+              <input
+                type="number"
+                className="input-dark"
+                placeholder="e.g. 250"
+                value={manualForm.materialCost}
+                onChange={(e) => setManualForm({ ...manualForm, materialCost: e.target.value })}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600, display: "block", marginBottom: 4 }}>Labour Hours</label>
+              <input
+                type="number"
+                className="input-dark"
+                placeholder="e.g. 8"
+                value={manualForm.laborHours}
+                onChange={(e) => setManualForm({ ...manualForm, laborHours: e.target.value })}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label style={{ fontSize: 11, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600, display: "block", marginBottom: 4 }}>Quality Grade</label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                {[{v:"basic",l:"Basic"},{v:"standard",l:"Standard"},{v:"premium",l:"Premium"},{v:"luxury",l:"Luxury"}].map((q) => (
+                  <button
+                    key={q.v}
+                    type="button"
+                    onClick={() => setManualForm({ ...manualForm, quality: q.v })}
+                    style={{
+                      padding: "8px 4px", borderRadius: 8, fontSize: 11, fontFamily: "Outfit", fontWeight: 600,
+                      border: manualForm.quality === q.v ? "1.5px solid #f97316" : "1px solid rgba(255,255,255,0.08)",
+                      background: manualForm.quality === q.v ? "rgba(249,115,22,0.15)" : "var(--bg-dark-3)",
+                      color: manualForm.quality === q.v ? "#f97316" : "#7d6548",
+                      cursor: "pointer",
+                    }}
+                  >{q.l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loading && !result && (
         <button
           onClick={runPricePrediction}
-          disabled={!studioImages?.ecommerce || !voiceSpecs}
           className="btn-primary w-full"
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
@@ -428,7 +599,7 @@ export default function PricePredictionPage() {
         >
           <span style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 12 }}>
             <Brain size={20} />
-            Run AI Price Prediction (SigLIP + TabPFN)
+            {isManualMode ? "Predict Price" : "Run AI Price Prediction (SigLIP + TabPFN)"}
             <Sparkles size={16} />
           </span>
         </button>
@@ -528,16 +699,16 @@ export default function PricePredictionPage() {
             </div>
 
             <div style={{ fontSize: 56, fontFamily: "Outfit", fontWeight: 900, color: "#f97316", lineHeight: 1, marginBottom: 8 }}>
-              ₹{result.predicted_price.toLocaleString("en-IN")}
+              ₹{(result.predicted_price ?? 0).toLocaleString("en-IN")}
             </div>
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16, marginBottom: 12 }}>
               <span style={{ fontSize: 13, color: "#7d6548" }}>
-                Low: <strong style={{ color: "#c4a882" }}>₹{result.confidence_low.toLocaleString("en-IN")}</strong>
+                Low: <strong style={{ color: "#c4a882" }}>₹{(result.confidence_low ?? 0).toLocaleString("en-IN")}</strong>
               </span>
               <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)" }} />
               <span style={{ fontSize: 13, color: "#7d6548" }}>
-                High: <strong style={{ color: "#c4a882" }}>₹{result.confidence_high.toLocaleString("en-IN")}</strong>
+                High: <strong style={{ color: "#c4a882" }}>₹{(result.confidence_high ?? 0).toLocaleString("en-IN")}</strong>
               </span>
             </div>
 
@@ -566,8 +737,8 @@ export default function PricePredictionPage() {
                 />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                <span style={{ fontSize: 10, color: "#7d6548" }}>₹{result.confidence_low.toLocaleString("en-IN")}</span>
-                <span style={{ fontSize: 10, color: "#7d6548" }}>₹{result.confidence_high.toLocaleString("en-IN")}</span>
+                <span style={{ fontSize: 10, color: "#7d6548" }}>₹{(result.confidence_low ?? 0).toLocaleString("en-IN")}</span>
+                <span style={{ fontSize: 10, color: "#7d6548" }}>₹{(result.confidence_high ?? 0).toLocaleString("en-IN")}</span>
               </div>
             </div>
 
@@ -644,7 +815,7 @@ export default function PricePredictionPage() {
                   <div>
                     <span style={{ fontSize: 10, color: "#7d6548", fontFamily: "Outfit", fontWeight: 600 }}>AI PRICE</span>
                     <div style={{ fontSize: 22, fontFamily: "Outfit", fontWeight: 900, color: "#f97316" }}>
-                      ₹{result.predicted_price.toLocaleString("en-IN")}
+                      ₹{(result.predicted_price ?? 0).toLocaleString("en-IN")}
                     </div>
                   </div>
                   <div>

@@ -15,8 +15,11 @@ import {
 import { useOnboardingPipeline } from "../../hooks/use-onboarding-pipeline";
 import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banner";
 
-// AI service runs on port 8000 directly
-const AI_BASE = process.env.NEXT_PUBLIC_AI_URL || "http://localhost:8000";
+// AI service runs on port 8000 directly.
+// Prefer 127.0.0.1 to avoid Windows localhost resolving to IPv6 [::1] where Uvicorn does not bind by default.
+const DEFAULT_AI_BASE =
+  process.env.NEXT_PUBLIC_AI_URL?.replace("localhost", "127.0.0.1") ||
+  "http://127.0.0.1:8000";
 
 type ProcessStep = "original" | "bg-removed" | "enhanced" | "ecommerce";
 type Operation = "remove_bg" | "enhance" | "ecommerce" | "all";
@@ -239,6 +242,43 @@ export default function AIStudioPage() {
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pipelineHook = useOnboardingPipeline();
 
+  // ── AI Service Health Check & Auto-discovery ───────────────────────────
+  const [activeAiBase, setActiveAiBase] = useState<string>(DEFAULT_AI_BASE);
+  const [aiStatus, setAiStatus] = useState<"checking" | "online" | "offline">("checking");
+  const [aiGpu, setAiGpu] = useState<string>("");
+
+  const checkAiHealth = useCallback(async () => {
+    setAiStatus("checking");
+    const candidates = [
+      activeAiBase,
+      "http://127.0.0.1:8000",
+      "http://localhost:8000",
+      DEFAULT_AI_BASE,
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+    for (const url of candidates) {
+      try {
+        const res = await axios.get(`${url}/health`, { timeout: 3000 });
+        if (res.data?.status === "ok") {
+          setActiveAiBase(url);
+          setAiStatus("online");
+          const gpu = res.data?.gpu_name || res.data?.device || "Ready";
+          setAiGpu(gpu);
+          return url;
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    setAiStatus("offline");
+    return null;
+  }, [activeAiBase]);
+
+  useEffect(() => {
+    checkAiHealth();
+  }, [checkAiHealth]);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -353,6 +393,63 @@ export default function AIStudioPage() {
     setPipeline({ stage: 0, done: [] });
   };
 
+  const parseAxiosError = async (err: any, defaultMsg: string): Promise<string> => {
+    if (err?.response?.data) {
+      if (typeof window !== "undefined" && err.response.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          return parsed.detail || parsed.message || text;
+        } catch {
+          // ignore parsing error
+        }
+      } else if (err.response.data.detail) {
+        return err.response.data.detail;
+      } else if (err.response.data.message) {
+        return err.response.data.message;
+      }
+    }
+    if (err?.code === "ERR_NETWORK" || err?.message === "Network Error") {
+      return "Network Error: AI Service on port 8000 is unreachable. Ensure the AI service is running (cd AI && python main.py).";
+    }
+    return err?.message || defaultMsg;
+  };
+
+  // Helper to post to AI service with automatic IPv4/localhost fallback
+  const postToAiService = async (
+    endpoint: string,
+    data: any,
+    config: any = {}
+  ) => {
+    const urlsToTry = [
+      activeAiBase,
+      "http://127.0.0.1:8000",
+      "http://localhost:8000",
+      DEFAULT_AI_BASE,
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+    let lastError: any;
+    for (const base of urlsToTry) {
+      try {
+        const res = await axios.post(`${base}${endpoint}`, data, config);
+        if (base !== activeAiBase) {
+          setActiveAiBase(base);
+          setAiStatus("online");
+        }
+        return res;
+      } catch (err: any) {
+        lastError = err;
+        // If connection refused / network error, attempt next host candidate
+        if (err?.code === "ERR_NETWORK" || err?.message === "Network Error") {
+          continue;
+        }
+        // If application-level error (4xx/5xx), don't try other hosts, throw directly
+        throw err;
+      }
+    }
+    throw lastError;
+  };
+
   // ---- Single operations ----
   const runRemoveBg = async () => {
     if (!file) return;
@@ -362,7 +459,7 @@ export default function AIStudioPage() {
     try {
       const fd = new FormData();
       fd.append("image", file);
-      const res = await axios.post(`${AI_BASE}/ai/image/remove-bg`, fd, {
+      const res = await postToAiService("/ai/image/remove-bg", fd, {
         headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
         responseType: "blob",
         timeout: 120000,
@@ -372,7 +469,8 @@ export default function AIStudioPage() {
       setActiveView("bg-removed");
       setPipeline({ stage: 0, done: [1] });
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Background removal failed — is the AI service running on port 8000?");
+      const msg = await parseAxiosError(err, "Background removal failed — is the AI service running on port 8000?");
+      setError(msg);
       setPipeline({ stage: 0, done: [] });
     } finally {
       setProcessing(false);
@@ -387,7 +485,7 @@ export default function AIStudioPage() {
     try {
       const fd = new FormData();
       fd.append("image", file);
-      const res = await axios.post(`${AI_BASE}/ai/image/enhance`, fd, {
+      const res = await postToAiService("/ai/image/enhance", fd, {
         headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
         responseType: "blob",
         timeout: 120000,
@@ -397,7 +495,8 @@ export default function AIStudioPage() {
       setActiveView("enhanced");
       setPipeline({ stage: 0, done: [2] });
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Enhancement failed — is the AI service running on port 8000?");
+      const msg = await parseAxiosError(err, "Enhancement failed — is the AI service running on port 8000?");
+      setError(msg);
       setPipeline({ stage: 0, done: [] });
     } finally {
       setProcessing(false);
@@ -410,27 +509,27 @@ export default function AIStudioPage() {
     setError("");
     setPipeline({ stage: 1, done: [] });
 
-    try {
-      // Animate stage progression
-      const stageDelay = (ms: number) =>
-        new Promise((resolve) => setTimeout(resolve, ms));
+    // Animate stage progression safely with timers
+    const timer1 = setTimeout(() => {
+      setPipeline({ stage: 2, done: [1] });
+    }, 3000);
+    const timer2 = setTimeout(() => {
+      setPipeline({ stage: 3, done: [1, 2] });
+    }, 7000);
 
+    try {
       const fd = new FormData();
       fd.append("image", file);
 
-      // Kick off the request
-      const promise = axios.post(`${AI_BASE}/ai/image/process-complete`, fd, {
+      // Directly await postToAiService so failure is caught immediately and candidate URLs are tried
+      const res = await postToAiService("/ai/image/process-complete", fd, {
         headers: { ...getAuthHeaders(), "Content-Type": "multipart/form-data" },
         timeout: 180000,
       });
 
-      // Animate stages while waiting (estimated timing)
-      await stageDelay(3000);
-      setPipeline({ stage: 2, done: [1] });
-      await stageDelay(4000);
-      setPipeline({ stage: 3, done: [1, 2] });
+      clearTimeout(timer1);
+      clearTimeout(timer2);
 
-      const res = await promise;
       const data = res.data.data;
 
       const bgRemovedUrl = `data:image/png;base64,${data.no_background}`;
@@ -459,7 +558,10 @@ export default function AIStudioPage() {
         startOnboardingCountdown();
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Pipeline failed — is the AI service running on port 8000?");
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      const msg = await parseAxiosError(err, "Pipeline failed — is the AI service running on port 8000?");
+      setError(msg);
       setPipeline({ stage: 0, done: [] });
     } finally {
       setProcessing(false);
@@ -560,10 +662,11 @@ export default function AIStudioPage() {
 
       {/* ---- Page Header ---- */}
       <div>
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <span className="badge badge-indigo">AI Powered</span>
           <span className="badge badge-saffron">Background Removal + Image Enhancer</span>
           <span className="badge badge-green">Studio Quality</span>
+
         </div>
         <h1 className="text-4xl font-black mb-2 gradient-text" style={{ fontFamily: "Outfit" }}>
           AI Product Studio
@@ -572,6 +675,8 @@ export default function AIStudioPage() {
           Transform phone photos into professional e-commerce images with automatic background removal and studio enhancement.
         </p>
       </div>
+
+
 
       {/* Target Product Context Banner */}
       {targetProductId && (

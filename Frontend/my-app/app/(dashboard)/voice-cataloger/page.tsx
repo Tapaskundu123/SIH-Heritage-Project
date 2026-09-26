@@ -23,18 +23,28 @@ interface PipelineResult {
   };
   translation?: {
     original: string;
+    english?: string;
     translated: string;
     was_translated: boolean;
   };
   extraction?: {
     name: string;
+    name_hindi?: string;
     category: string;
     materials: string[];
     colors: string[];
     craft_technique?: string;
+    origin_region?: string;
+    dimensions?: string;
     price_hint?: number;
+    price?: number;
+    suggestedPrice?: number;
     tags: string[];
+    key_features?: string[];
     description_en: string;
+    description_hi?: string;
+    care_instructions?: string;
+    ai_engine?: string;
     confidence: number;
   };
 }
@@ -192,14 +202,23 @@ export default function VoiceCatalogerPage() {
       if (res.data.success) {
         const pipeline = res.data.data.pipeline;
         setResult(pipeline);
+        const ext = pipeline.extraction || {};
         const specs = {
-          name: pipeline.extraction?.name || "",
-          category: pipeline.extraction?.category || "other",
-          description: pipeline.extraction?.description_en || "",
-          materials: pipeline.extraction?.materials?.join(", ") || "",
-          tags: pipeline.extraction?.tags?.join(", ") || "",
-          price: pipeline.extraction?.price_hint || "",
-          craftTechnique: pipeline.extraction?.craft_technique || "",
+          name: ext.name || "",
+          name_hindi: ext.name_hindi || "",
+          category: ext.category || "other",
+          description: ext.description_en || "",
+          description_hi: ext.description_hi || "",
+          materials: Array.isArray(ext.materials) ? ext.materials.join(", ") : (ext.materials || ""),
+          colors: Array.isArray(ext.colors) ? ext.colors.join(", ") : (ext.colors || ""),
+          tags: Array.isArray(ext.tags) ? ext.tags.join(", ") : (ext.tags || ""),
+          price: ext.suggestedPrice || ext.price_hint || ext.price || "",
+          craftTechnique: ext.craft_technique || "",
+          originRegion: ext.origin_region || "",
+          dimensions: ext.dimensions || "",
+          key_features: Array.isArray(ext.key_features) ? ext.key_features : [],
+          care_instructions: ext.care_instructions || "",
+          ai_engine: ext.ai_engine || "",
         };
         setEditedProduct(specs);
         setStage("done");
@@ -237,9 +256,12 @@ export default function VoiceCatalogerPage() {
       await axios.post("http://localhost:5000/api/products", {
         ...editedProduct,
         materials: String(editedProduct?.materials || "").split(",").map((m: string) => m.trim()).filter(Boolean),
+        colors: String(editedProduct?.colors || "").split(",").map((c: string) => c.trim()).filter(Boolean),
         tags: String(editedProduct?.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
         price: Number(editedProduct?.price) || 0,
         stock: Number(editedProduct?.stock) > 0 ? Number(editedProduct?.stock) : 10,
+        name_hindi: String(editedProduct?.name_hindi || ""),
+        description_hi: String(editedProduct?.description_hi || ""),
         voiceTranscript: result?.asr?.transcript,
         detectedLanguage: result?.asr?.detected_language,
         isAIGenerated: true,
@@ -487,93 +509,248 @@ export default function VoiceCatalogerPage() {
         </div>
       )}
 
-      {/* Extracted Product Info — Editable */}
+      {/* ── AI-Generated Product Specification (Bilingual) ── */}
       {editedProduct && stage === "done" && (
-        <div className="glass-card p-6">
-          <div className="flex items-center gap-2 mb-5">
-            <Sparkles size={18} style={{ color: "#f97316" }} />
-            <h3 className="font-bold" style={{ fontFamily: "Outfit", color: "#f5efe6" }}>
-              AI-Extracted Product Information
-            </h3>
-            <span className="badge badge-green ml-auto">
-              <Check size={10} /> Auto-filled
+        <div className="glass-card p-6" style={{ position: "relative", overflow: "hidden" }}>
+          {/* Decorative background accent */}
+          <div style={{
+            position: "absolute", top: -60, right: -60, width: 180, height: 180,
+            borderRadius: "50%", background: "radial-gradient(circle, rgba(249,115,22,0.08), transparent 70%)",
+            pointerEvents: "none",
+          }} />
+
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-6">
+            <div style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: "linear-gradient(135deg, rgba(249,115,22,0.25), rgba(234,88,12,0.15))",
+              border: "1px solid rgba(249,115,22,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Sparkles size={18} style={{ color: "#f97316" }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 className="font-bold" style={{ fontFamily: "Outfit", color: "#f5efe6", fontSize: 16 }}>
+                AI-Generated Product Specification
+              </h3>
+              <div style={{ fontSize: 11, color: "#7d6548" }}>
+                {String(editedProduct.ai_engine || "Qwen2.5-3B-Instruct")} · Bilingual EN + HI
+              </div>
+            </div>
+            <span className="badge badge-green">
+              <Check size={10} /> Auto-Generated
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                <Package size={12} className="inline mr-1" /> Product Name
-              </label>
-              <input className="input-dark" value={String(editedProduct.name || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, name: e.target.value })} />
+          {/* ── Bilingual Title Block ── */}
+          <div style={{
+            marginBottom: 20,
+            padding: "16px 18px",
+            borderRadius: 14,
+            background: "linear-gradient(135deg, rgba(249,115,22,0.07), rgba(129,140,248,0.04))",
+            border: "1px solid rgba(249,115,22,0.2)",
+          }}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#f97316", letterSpacing: 1, marginBottom: 4 }}>
+                ENGLISH TITLE
+              </div>
+              <input
+                className="input-dark"
+                style={{ fontFamily: "Outfit", fontWeight: 700, fontSize: 15, color: "#f5efe6" }}
+                value={String(editedProduct.name || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, name: e.target.value })}
+              />
             </div>
-
             <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                Category
-              </label>
-              <select className="input-dark" value={String(editedProduct.category || "other")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, category: e.target.value })}>
-                {["textiles", "pottery", "jewelry", "woodwork", "metalwork", "paintings", "leather", "bamboo", "stone", "other"].map((c) => (
+              <div style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#818cf8", letterSpacing: 1, marginBottom: 4 }}>
+                हिंदी शीर्षक
+              </div>
+              <input
+                className="input-dark"
+                style={{ fontFamily: "Noto Sans Devanagari, sans-serif", fontWeight: 600, fontSize: 15, color: "#c4a882" }}
+                value={String(editedProduct.name_hindi || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, name_hindi: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* ── Meta Row: Category / Region / Technique / Price ── */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ marginBottom: 20 }}>
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-dark-3)", border: "1px solid var(--border-subtle)" }}>
+              <div style={{ fontSize: 9, color: "#7d6548", fontFamily: "Outfit", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>CATEGORY</div>
+              <select
+                className="input-dark"
+                style={{ padding: "4px 6px", fontSize: 12, background: "transparent", border: "none", color: "#f5efe6", width: "100%" }}
+                value={String(editedProduct.category || "other")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, category: e.target.value })}
+              >
+                {["textiles","pottery","jewelry","woodwork","metalwork","paintings","leather","bamboo","stone","other"].map((c) => (
                   <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                 ))}
               </select>
             </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                <FileText size={12} className="inline mr-1" /> Description
-              </label>
-              <textarea className="input-dark resize-none" rows={3}
-                value={String(editedProduct.description || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, description: e.target.value })} />
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-dark-3)", border: "1px solid var(--border-subtle)" }}>
+              <div style={{ fontSize: 9, color: "#7d6548", fontFamily: "Outfit", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>ORIGIN REGION</div>
+              <input
+                className="input-dark"
+                style={{ padding: "4px 6px", fontSize: 12, background: "transparent", border: "none", color: "#f5efe6", width: "100%" }}
+                value={String(editedProduct.originRegion || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, originRegion: e.target.value })}
+              />
             </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                Materials (comma separated)
-              </label>
-              <input className="input-dark" value={String(editedProduct.materials || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, materials: e.target.value })} />
+            <div style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg-dark-3)", border: "1px solid var(--border-subtle)" }}>
+              <div style={{ fontSize: 9, color: "#7d6548", fontFamily: "Outfit", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>CRAFT TECHNIQUE</div>
+              <input
+                className="input-dark"
+                style={{ padding: "4px 6px", fontSize: 11, background: "transparent", border: "none", color: "#f5efe6", width: "100%" }}
+                value={String(editedProduct.craftTechnique || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, craftTechnique: e.target.value })}
+              />
             </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                <DollarSign size={12} className="inline mr-1" /> Suggested Price (₹)
-              </label>
-              <input type="number" className="input-dark" value={String(editedProduct.price || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, price: e.target.value })} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                <Tag size={12} className="inline mr-1" /> Tags (comma separated)
-              </label>
-              <input className="input-dark" value={String(editedProduct.tags || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, tags: e.target.value })} />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium mb-1.5" style={{ color: "#c4a882", fontFamily: "Outfit" }}>
-                Craft Technique
-              </label>
-              <input className="input-dark" value={String(editedProduct.craftTechnique || "")}
-                onChange={(e) => setEditedProduct({ ...editedProduct, craftTechnique: e.target.value })} />
+            <div style={{
+              padding: "10px 12px", borderRadius: 10,
+              background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.07))",
+              border: "1px solid rgba(16,185,129,0.3)",
+            }}>
+              <div style={{ fontSize: 9, color: "#34d399", fontFamily: "Outfit", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>SUGGESTED PRICE ₹</div>
+              <input
+                type="number"
+                className="input-dark"
+                style={{ padding: "4px 6px", fontSize: 14, fontWeight: 700, background: "transparent", border: "none", color: "#34d399", width: "100%" }}
+                value={String(editedProduct.price || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, price: e.target.value })}
+              />
             </div>
           </div>
 
-          {/* Confidence badge */}
+          {/* ── Bilingual Description Block ── */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#f97316", letterSpacing: 1, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <FileText size={11} /> ENGLISH DESCRIPTION
+              </div>
+              <textarea
+                className="input-dark resize-none"
+                rows={4}
+                style={{ lineHeight: 1.7, fontSize: 13 }}
+                value={String(editedProduct.description || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, description: e.target.value })}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#818cf8", letterSpacing: 1, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <Globe size={11} /> हिंदी विवरण
+              </div>
+              <textarea
+                className="input-dark resize-none"
+                rows={4}
+                style={{ lineHeight: 1.8, fontSize: 13, fontFamily: "Noto Sans Devanagari, sans-serif", color: "#c4a882" }}
+                value={String(editedProduct.description_hi || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, description_hi: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* ── Key Features ── */}
+          {Array.isArray(editedProduct.key_features) && (editedProduct.key_features as string[]).length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, marginBottom: 8 }}>
+                ✨ KEY FEATURES
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {(editedProduct.key_features as string[]).map((feat: string, i: number) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    padding: "8px 12px", borderRadius: 8,
+                    background: "var(--bg-dark-3)", border: "1px solid var(--border-subtle)",
+                  }}>
+                    <Check size={12} style={{ color: "#34d399", flexShrink: 0, marginTop: 2 }} />
+                    <span style={{ fontSize: 12, color: "#c4a882", lineHeight: 1.5 }}>{feat}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Materials / Colors / Tags Row ── */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ marginBottom: 20 }}>
+            <div>
+              <label style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, display: "block", marginBottom: 6 }}>
+                MATERIALS (comma separated)
+              </label>
+              <input
+                className="input-dark"
+                value={String(editedProduct.materials || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, materials: e.target.value })}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, display: "block", marginBottom: 6 }}>
+                COLORS
+              </label>
+              <input
+                className="input-dark"
+                value={String(editedProduct.colors || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, colors: e.target.value })}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, display: "block", marginBottom: 6 }}>
+                <Tag size={10} className="inline mr-1" /> TAGS
+              </label>
+              <input
+                className="input-dark"
+                value={String(editedProduct.tags || "")}
+                onChange={(e) => setEditedProduct({ ...editedProduct, tags: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {/* ── Dimensions + Care Instructions ── */}
+          {(editedProduct.dimensions || editedProduct.care_instructions) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4" style={{ marginBottom: 20 }}>
+              {editedProduct.dimensions && (
+                <div>
+                  <label style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, display: "block", marginBottom: 6 }}>
+                    DIMENSIONS
+                  </label>
+                  <input
+                    className="input-dark"
+                    value={String(editedProduct.dimensions || "")}
+                    onChange={(e) => setEditedProduct({ ...editedProduct, dimensions: e.target.value })}
+                  />
+                </div>
+              )}
+              {editedProduct.care_instructions && (
+                <div>
+                  <label style={{ fontSize: 10, fontFamily: "Outfit", fontWeight: 700, color: "#c4a882", letterSpacing: 1, display: "block", marginBottom: 6 }}>
+                    CARE INSTRUCTIONS
+                  </label>
+                  <input
+                    className="input-dark"
+                    value={String(editedProduct.care_instructions || "")}
+                    onChange={(e) => setEditedProduct({ ...editedProduct, care_instructions: e.target.value })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Confidence Bar ── */}
           {result?.extraction?.confidence && (
-            <div className="mt-4 flex items-center gap-2 text-xs" style={{ color: "#7d6548" }}>
-              AI Extraction Confidence:
-              <div className="flex-1 h-1.5 rounded-full" style={{ background: "var(--bg-dark-3)" }}>
-                <div className="h-full rounded-full" style={{
+            <div className="flex items-center gap-3 text-xs" style={{ color: "#7d6548", marginBottom: 20 }}>
+              <span style={{ whiteSpace: "nowrap" }}>AI Confidence:</span>
+              <div style={{ flex: 1, height: 4, borderRadius: 4, background: "var(--bg-dark-3)" }}>
+                <div style={{
+                  height: "100%", borderRadius: 4,
                   width: `${result.extraction.confidence * 100}%`,
-                  background: result.extraction.confidence > 0.7 ? "#10b981" : "#f97316",
+                  background: result.extraction.confidence > 0.7
+                    ? "linear-gradient(90deg, #10b981, #34d399)"
+                    : "linear-gradient(90deg, #f97316, #fb923c)",
+                  transition: "width 0.8s ease",
                 }} />
               </div>
-              <span style={{ color: result.extraction.confidence > 0.7 ? "#34d399" : "#f97316" }}>
+              <span style={{ color: result.extraction.confidence > 0.7 ? "#34d399" : "#f97316", fontWeight: 700 }}>
                 {Math.round(result.extraction.confidence * 100)}%
               </span>
             </div>
@@ -581,15 +758,12 @@ export default function VoiceCatalogerPage() {
 
           {/* ── ONBOARDING: Continue to Price Prediction ── */}
           {isOnboardingMode && (
-            <div
-              style={{
-                marginTop: 20,
-                padding: "18px 20px",
-                borderRadius: 14,
-                background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.06))",
-                border: "1px solid rgba(16,185,129,0.4)",
-              }}
-            >
+            <div style={{
+              padding: "18px 20px",
+              borderRadius: 14,
+              background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(5,150,105,0.06))",
+              border: "1px solid rgba(16,185,129,0.4)",
+            }}>
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 13, fontFamily: "Outfit", fontWeight: 700, color: "#10b981", marginBottom: 4 }}>
                   ✅ Voice Pipeline Complete!
@@ -601,9 +775,7 @@ export default function VoiceCatalogerPage() {
 
               {onboardingContinueCountdown !== null && (
                 <div style={{ textAlign: "center", marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: "#7d6548", marginBottom: 4 }}>
-                    Auto-navigating to AI Price Prediction in...
-                  </div>
+                  <div style={{ fontSize: 11, color: "#7d6548", marginBottom: 4 }}>Auto-navigating to AI Price Prediction in...</div>
                   <div style={{ fontSize: 28, fontFamily: "Outfit", fontWeight: 900, color: "#f97316" }}>
                     {onboardingContinueCountdown}s
                   </div>
@@ -613,7 +785,6 @@ export default function VoiceCatalogerPage() {
               <button
                 onClick={() => {
                   if (countdownRef.current) clearInterval(countdownRef.current);
-                  // Save any edits to the pipeline state before navigating
                   pipelineHook.completeVoiceStep({
                     name: String(editedProduct?.name || ""),
                     category: String(editedProduct?.category || ""),
