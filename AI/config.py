@@ -45,15 +45,6 @@ class Settings(BaseSettings):
     # Model directories (cached locally)
     MODELS_DIR: str = str(Path.home() / ".karigarsetu" / "models")
 
-    # Whisper ASR
-    WHISPER_MODEL: str = "medium"  # Options: tiny, base, small, medium, large-v3
-    WHISPER_DEVICE: str = "cuda" if torch.cuda.is_available() else "cpu"
-    WHISPER_COMPUTE_TYPE: str = "float16" if torch.cuda.is_available() else "int8"
-
-    # Translation (NLLB)
-    NLLB_MODEL: str = "facebook/nllb-200-distilled-600M"
-    NLLB_MAX_LENGTH: int = 512
-
     # Image Processing
     ESRGAN_MODEL: str = "RealESRGAN_x4plus"
     BG_REMOVAL_MODEL: str = "u2net"  # Options: u2net, u2netp, u2net_human_seg
@@ -78,8 +69,10 @@ class Settings(BaseSettings):
     # TabPFN Token (multimodal pricing)
     TABPFN_TOKEN: str = os.getenv("TABPFN_TOKEN", "")
 
-    # Qwen 2.5-3B-Instruct (Hugging Face API)
+    # Qwen 2.5-3B-Instruct (Local offline & HF API fallback)
     QWEN_MODEL: str = "Qwen/Qwen2.5-3B-Instruct"
+    QWEN_LOCAL_DIR: str = str(Path(__file__).resolve().parent / "models" / "qwen2.5-3b-instruct")
+    QWEN_USE_LOCAL: bool = False
 
     # API
     MAX_AUDIO_SIZE_MB: int = 50

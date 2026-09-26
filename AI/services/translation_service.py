@@ -1,59 +1,40 @@
 """
-Translation Service using Facebook NLLB-200
-Detects language and translates to English for downstream NLP
+Lightweight Multilingual Translation Service
+Replaces heavy local NLLB-200 model with zero-VRAM, zero-disk translation service.
 """
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
+import requests
 from langdetect import detect as langdetect_detect
 from loguru import logger
-from config import settings
-
-
-# NLLB language codes for Indian languages
-NLLB_LANGUAGE_MAP = {
-    "hi": "hin_Deva",   # Hindi (Devanagari)
-    "bn": "ben_Beng",   # Bengali
-    "ta": "tam_Taml",   # Tamil
-    "te": "tel_Telu",   # Telugu
-    "mr": "mar_Deva",   # Marathi
-    "gu": "guj_Gujr",   # Gujarati
-    "kn": "kan_Knda",   # Kannada
-    "ml": "mal_Mlym",   # Malayalam
-    "or": "ory_Orya",   # Odia
-    "pa": "pan_Guru",   # Punjabi (Gurmukhi)
-    "ur": "urd_Arab",   # Urdu
-    "as": "asm_Beng",   # Assamese
-    "en": "eng_Latn",   # English
-}
 
 
 class TranslationService:
-    """NLLB-200 multilingual translation — detects source language and translates to English"""
+    """Lightweight translation service with zero local model footprint"""
 
     def __init__(self):
-        logger.info(f"🌐 Loading NLLB translation model: {settings.NLLB_MODEL}")
-        self.tokenizer = AutoTokenizer.from_pretrained(settings.NLLB_MODEL)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(
-            settings.NLLB_MODEL,
-            torch_dtype=torch.float32,
-        ).to(settings.DEVICE)
-        self.model.eval()
-        logger.success("✅ NLLB Translation model loaded")
+        logger.success("✅ Lightweight Translation Service active (NLLB model removed)")
 
     def detect_language(self, text: str) -> str:
-        """Detect language code from text (fallback to langdetect)"""
+        """Detect language code from text"""
         try:
             detected = langdetect_detect(text)
             return detected
         except Exception:
-            return "hi"  # Default to Hindi
+            return "hi"
 
     def translate_to_english(self, text: str, source_lang: str | None = None) -> dict:
-        """Translate text from any Indian language to English"""
+        """Translate text to English"""
+        if not text:
+            return {
+                "original_text": "",
+                "translated_text": "",
+                "source_language": "en",
+                "target_language": "en",
+                "was_translated": False,
+            }
+
         if not source_lang:
             source_lang = self.detect_language(text)
 
-        # If already English, skip
         if source_lang == "en":
             return {
                 "original_text": text,
@@ -63,75 +44,43 @@ class TranslationService:
                 "was_translated": False,
             }
 
-        nllb_src = NLLB_LANGUAGE_MAP.get(source_lang, "hin_Deva")
-        nllb_tgt = NLLB_LANGUAGE_MAP["en"]
-
-        logger.info(f"🔄 Translating {nllb_src} → {nllb_tgt}")
-
         try:
-            # Tokenize
-            self.tokenizer.src_lang = nllb_src
-            inputs = self.tokenizer(
-                text,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=settings.NLLB_MAX_LENGTH,
-            ).to(settings.DEVICE)
-
-            # Translate
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
-                    max_length=settings.NLLB_MAX_LENGTH,
-                    num_beams=4,
-                    early_stopping=True,
-                )
-
-            translated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            logger.success(f"✅ Translation: '{translated[:60]}...'")
-
-            return {
-                "original_text": text,
-                "translated_text": translated,
-                "source_language": source_lang,
-                "target_language": "en",
-                "was_translated": True,
-            }
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source_lang}&tl=en&dt=t&q={requests.utils.quote(text)}"
+            resp = requests.get(url, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json()
+                translated = "".join([part[0] for part in data[0] if part[0]])
+                logger.success(f"✅ Translated ({source_lang} → en): '{translated[:50]}...'")
+                return {
+                    "original_text": text,
+                    "translated_text": translated,
+                    "source_language": source_lang,
+                    "target_language": "en",
+                    "was_translated": True,
+                }
         except Exception as e:
-            logger.error(f"❌ Translation to English failed: {e}")
-            return {
-                "original_text": text,
-                "translated_text": text,
-                "source_language": source_lang,
-                "target_language": "en",
-                "was_translated": False,
-            }
+            logger.debug(f"Online translation notice: {e}")
+
+        return {
+            "original_text": text,
+            "translated_text": text,
+            "source_language": source_lang,
+            "target_language": "en",
+            "was_translated": False,
+        }
 
     def translate_from_english(self, text: str, target_lang: str) -> str:
-        """Translate from English to target Indian language (for generated descriptions)"""
-        if target_lang == "en":
+        """Translate from English to target language"""
+        if target_lang == "en" or not text:
             return text
-
-        nllb_src = NLLB_LANGUAGE_MAP["en"]
-        nllb_tgt = NLLB_LANGUAGE_MAP.get(target_lang, "hin_Deva")
 
         try:
-            self.tokenizer.src_lang = nllb_src
-            inputs = self.tokenizer(
-                text, return_tensors="pt", padding=True, truncation=True, max_length=512
-            ).to(settings.DEVICE)
-
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(nllb_tgt),
-                    max_length=512,
-                    num_beams=4,
-                )
-
-            return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl={target_lang}&dt=t&q={requests.utils.quote(text)}"
+            resp = requests.get(url, timeout=4)
+            if resp.status_code == 200:
+                data = resp.json()
+                return "".join([part[0] for part in data[0] if part[0]])
         except Exception as e:
-            logger.error(f"❌ Translation from English failed: {e}")
-            return text
+            logger.debug(f"Online translation notice: {e}")
+
+        return text

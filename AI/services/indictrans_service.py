@@ -26,7 +26,7 @@ class IndicTransService:
             # We attempt lightweight init or fallback to TranslationService
             from services.translation_service import TranslationService
             self.nllb_fallback = TranslationService()
-            logger.success("✅ Translation pipeline initialized (IndicTrans2 / NLLB dual engine)")
+            logger.success("✅ Translation pipeline initialized (IndicTrans2 / Lightweight translation engine)")
         except Exception as e:
             logger.warning(f"Translation engine fallback notice: {e}")
 

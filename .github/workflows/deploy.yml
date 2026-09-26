@@ -1,0 +1,146 @@
+name: Deploy to Server
+
+# ---------------------------------------------------------------
+# Deploys the latest Docker images to your server via SSH.
+# Triggers:
+#   1. Manual dispatch (Go to Actions → Deploy to Server → Run workflow)
+#   2. Automatically after build-and-push.yml succeeds on main
+#
+# Required GitHub Secrets:
+#   DEPLOY_HOST    — server IP or hostname
+#   DEPLOY_USER    — SSH username (e.g. ubuntu, root)
+#   DEPLOY_KEY     — SSH private key (PEM format)
+#   MONGODB_URI    — MongoDB Atlas connection string
+#   JWT_SECRET     — JWT secret
+#   HF_TOKEN       — Hugging Face API token
+#   CORS_ORIGIN    — Allowed CORS origins (e.g. https://yourdomain.com)
+#
+# Required GitHub Variables (Settings → Variables):
+#   NEXT_PUBLIC_API_URL   — Public backend URL (e.g. https://api.yourdomain.com)
+#   NEXT_PUBLIC_AI_URL    — Public AI URL (e.g. https://ai.yourdomain.com)
+# ---------------------------------------------------------------
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+      environment:
+        description: "Target environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+  workflow_run:
+    workflows: ["Build & Push Docker Images"]
+    types: [completed]
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+  IMAGE_TAG: ${{ github.event.inputs.image_tag || 'latest' }}
+
+jobs:
+
+  deploy:
+    name: "Deploy — ${{ github.event.inputs.environment || 'production' }}"
+    runs-on: ubuntu-latest
+    # Only run if triggered manually OR if the build-and-push workflow succeeded
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+      - name: Checkout code (for docker-compose.yml)
+        uses: actions/checkout@v4
+
+      - name: Verify deployment secrets are set
+        run: |
+          if [ -z "${{ secrets.DEPLOY_HOST }}" ]; then
+            echo "❌ DEPLOY_HOST secret is not set. Please add it in GitHub Settings → Secrets."
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_KEY }}" ]; then
+            echo "❌ DEPLOY_KEY secret is not set. Please add it in GitHub Settings → Secrets."
+            exit 1
+          fi
+          echo "✅ Deployment secrets found."
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy docker-compose files to server
+        run: |
+          scp docker-compose.yml ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/karigarsetu/
+          # Note: do NOT copy .env files — they are written from secrets below
+
+      - name: Write .env.compose on server (from GitHub Secrets)
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} "cat > ~/karigarsetu/.env.compose.local << 'ENVEOF'
+          GITHUB_REPOSITORY_OWNER=${{ env.OWNER }}
+          IMAGE_TAG=${{ env.IMAGE_TAG }}
+          MONGODB_URI=${{ secrets.MONGODB_URI }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN=7d
+          NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_AI_URL=${{ vars.NEXT_PUBLIC_AI_URL }}
+          CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
+          HF_TOKEN=${{ secrets.HF_TOKEN }}
+          WHISPER_MODEL=medium
+          UPLOAD_DIR=uploads
+          MAX_FILE_SIZE=10485760
+          ENVEOF"
+
+      - name: Login to GHCR on server
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+      - name: Pull latest images on server
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "cd ~/karigarsetu && \
+             docker compose --env-file .env.compose.local pull"
+
+      - name: Deploy with zero-downtime rolling restart
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "cd ~/karigarsetu && \
+             docker compose --env-file .env.compose.local up -d --remove-orphans && \
+             docker image prune -f"
+
+      - name: Verify deployment health
+        run: |
+          sleep 15
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "docker compose --env-file ~/karigarsetu/.env.compose.local ps"
+
+      - name: Write deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server**: \`${{ secrets.DEPLOY_HOST }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ env.OWNER }}/karigarsetu-backend:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ env.OWNER }}/karigarsetu-ai:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ env.OWNER }}/karigarsetu-frontend:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY

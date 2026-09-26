@@ -45,12 +45,12 @@ export default function PricingScreen() {
         labor_hours: parseFloat(form.craftingHours) || 1,
         region: form.region || 'default',
       }, { timeout: 30000 });
-      const d = res.data;
+      const d = res.data?.data || res.data;
       const priceResult: PriceResult = {
         recommended_price: d.suggested_price || d.recommended_price || 0,
         price_range: { min: d.min_price || d.price_range?.min || 0, max: d.max_price || d.price_range?.max || 0 },
         reasoning: d.reasoning || `Calculated from ${form.craftingHours}h labor + materials.`,
-        market_insights: d.market_insights || [],
+        market_insights: d.market_insights || d.insights || [],
       };
       setResult(priceResult);
       // 🔗 Advance onboarding pipeline

@@ -137,6 +137,7 @@ async def health():
             "translator": hasattr(app.state, "translator"),
             "indictrans": hasattr(app.state, "indictrans"),
             "qwen_extractor": hasattr(app.state, "qwen_extractor"),
+            "qwen_local_offline": hasattr(app.state, "qwen_extractor") and getattr(app.state.qwen_extractor, "is_local_available", lambda: False)(),
             "bg_remover": hasattr(app.state, "bg_remover"),
             "enhancer": hasattr(app.state, "enhancer"),
         },

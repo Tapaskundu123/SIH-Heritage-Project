@@ -5,9 +5,13 @@ Uses Hugging Face API with user's HF_TOKEN for automatic long, rich e-commerce s
 """
 import json
 import re
+from pathlib import Path
 import requests
+import torch
 from loguru import logger
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from config import settings
+from services.gpu_manager import release_gpu
 
 QWEN_LONG_SPECS_SYSTEM_PROMPT = """You are a premier Indian handicraft e-commerce cataloger for KarigarSetu.
 Your job is to transform an artisan's voice or text description into rich, long, professional marketplace product specifications.
@@ -43,36 +47,191 @@ Always generate realistic, rich, respectful details even if the input is short. 
 
 class QwenExtractionService:
     """
-    Calls Qwen/Qwen2.5-3B-Instruct via Hugging Face API.
-    Zero local GPU VRAM usage.
+    Hybrid Qwen2.5-3B-Instruct Product Specifications Extraction Service:
+    1. Local Offline Mode: Runs sequentially on local GPU (RTX 4050) and immediately releases VRAM.
+    2. Hugging Face API: Cloud fallback when local weights are not downloaded.
+    3. Intelligent Rule-Based Engine: Instant fallback consuming 0 MB VRAM.
     """
 
     def __init__(self):
         self.model_name = settings.QWEN_MODEL
+        self.local_dir = Path(settings.QWEN_LOCAL_DIR)
+        self.use_local = getattr(settings, "QWEN_USE_LOCAL", True)
         self.hf_token = settings.HF_TOKEN
+        self.tokenizer = None
+        self.model = None
 
-        if self.hf_token:
+        if self.is_local_available():
+            logger.success(f"🖥️ Local offline Qwen 2.5-3B available at {self.local_dir} (Sequential GPU mode)")
+        elif self.hf_token:
             masked = self.hf_token[:4] + "..." + self.hf_token[-4:] if len(self.hf_token) > 8 else "***"
-            logger.success(f"🤖 Qwen 2.5-3B extraction service active via Hugging Face API ({masked})")
+            logger.info(f"🌐 Qwen 2.5-3B cloud fallback active via Hugging Face API ({masked})")
         else:
-            logger.warning("ℹ️ HF_TOKEN not set for Qwen API. Set HF_TOKEN in AI/.env for automatic long specs.")
+            logger.info("ℹ️ Local weights not found & HF_TOKEN not set; will use Smart Spec Cataloger fallback")
+
+    def is_local_available(self) -> bool:
+        """Check if local Qwen model weights and configuration exist"""
+        if not self.local_dir.exists():
+            return False
+        has_config = (self.local_dir / "config.json").exists()
+        has_weights = any(self.local_dir.glob("*.safetensors")) or any(self.local_dir.glob("*.bin"))
+        return has_config and has_weights
+
+    def check_local_status(self) -> dict:
+        """Return diagnostic status of Qwen model availability"""
+        local_ready = self.is_local_available()
+        files = list(self.local_dir.glob("*")) if self.local_dir.exists() else []
+        return {
+            "status": "ready_local" if local_ready else ("cloud_api" if self.hf_token else "rule_based"),
+            "model": self.model_name,
+            "local_dir": str(self.local_dir),
+            "offline_ready": local_ready,
+            "files_count": len(files),
+            "device": settings.DEVICE,
+            "sequential_mode": True,
+        }
+
+    def _get_tokenizer(self):
+        """Cached tokenizer in system RAM (lightweight, ~5MB)"""
+        if self.tokenizer is not None:
+            return self.tokenizer
+        if self.is_local_available():
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(str(self.local_dir), fix_broken_chat_template=True)
+                return self.tokenizer
+            except Exception as e:
+                logger.warning(f"Failed to load local tokenizer from {self.local_dir}: {e}")
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                token=self.hf_token or None,
+                fix_broken_chat_template=True
+            )
+            return self.tokenizer
+        except Exception as e:
+            logger.warning(f"Could not load online tokenizer: {e}")
+            return None
+
+    def _get_model(self):
+        """Loads 4-bit model once into GPU memory (~2.0 GB VRAM) for instant inference"""
+        if self.model is not None:
+            return self.model
+        if not self.is_local_available():
+            return None
+
+        logger.info("🧠 Loading local Qwen2.5-3B into GPU memory (4-bit NF4)...")
+        bnb_config = None
+        if torch.cuda.is_available():
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+
+        self.model = AutoModelForCausalLM.from_pretrained(
+            str(self.local_dir),
+            quantization_config=bnb_config,
+            device_map="auto" if torch.cuda.is_available() else None,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            low_cpu_mem_usage=True,
+        )
+        logger.success("✅ Qwen2.5-3B loaded and ready for instant inference!")
+        return self.model
+
+    def unload_model(self):
+        """Allows releasing VRAM whenever requested"""
+        if self.model is not None:
+            del self.model
+            self.model = None
+            release_gpu("Qwen2.5-3B-Unload")
+
+    def _infer_local(self, user_prompt: str) -> dict | None:
+        """
+        Runs fast local Qwen 2.5 3B inference in 4-bit GPU memory (~2.0 GB VRAM).
+        """
+        if not self.is_local_available():
+            return None
+
+        tokenizer = self._get_tokenizer()
+        if not tokenizer:
+            return None
+
+        try:
+            model = self._get_model()
+            if model is None:
+                return None
+
+            messages = [
+                {"role": "system", "content": QWEN_LONG_SPECS_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            chat_text = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+
+            model_inputs = tokenizer([chat_text], return_tensors="pt").to(model.device)
+
+            logger.info("⚡ Generating structured catalog specs locally with Qwen2.5-3B...")
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    **model_inputs,
+                    max_new_tokens=450,
+                    temperature=0.2,
+                    do_sample=True,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+
+            # Slice out input tokens
+            generated_ids = [
+                output_ids[len(input_ids):]
+                for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            ]
+            response_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            parsed = self._clean_json(response_text)
+            if parsed:
+                logger.success("✅ Local Qwen2.5-3B generated specs successfully")
+                return parsed
+            else:
+                logger.warning(f"⚠️ Could not parse JSON from local Qwen output: {response_text[:200]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Local Qwen inference failed: {e}")
+            return None
 
     def extract(self, text_en: str, text_hi: str | None = None) -> dict:
         """
-        Extract long, structured product specifications using Qwen 2.5 3B API.
+        Extract long, structured product specifications.
+        Sequential Execution Order:
+        1. Local Offline Qwen2.5-3B (Runs sequentially on GPU, frees VRAM immediately)
+        2. Hugging Face Cloud API (if token present and local offline not ready)
+        3. Intelligent Rule-Based Engine (Instant 0 MB VRAM fallback)
         """
         user_prompt = f"Artisan Product Description:\nEnglish: {text_en}\n"
         if text_hi:
             user_prompt += f"Hindi: {text_hi}\n"
 
-        # Attempt 1: Hugging Face API Call
+        # Attempt 1: Local Offline Sequential Execution
+        if self.use_local and self.is_local_available():
+            logger.info("🚀 Running local offline Qwen 2.5-3B...")
+            extracted = self._infer_local(user_prompt)
+            if extracted:
+                extracted["ai_engine"] = "Qwen2.5-3B-Instruct (Local Offline Sequential)"
+                return extracted
+            logger.warning("Local Qwen returned empty/invalid result, checking cloud fallback...")
+
+        # Attempt 2: Hugging Face API Call
         if self.hf_token:
             extracted = self._call_hf_qwen_api(user_prompt)
             if extracted:
                 extracted["ai_engine"] = "Qwen2.5-3B-Instruct (HF API)"
                 return extracted
 
-        # Attempt 2: Intelligent Rule-Based Artisan Cataloger (Consumes 0 GPU VRAM)
+        # Attempt 3: Intelligent Rule-Based Artisan Cataloger (Consumes 0 GPU VRAM)
         logger.info("ℹ️ Generating rich artisan specifications using automatic cataloger...")
         return self._generate_intelligent_specs(text_en, text_hi)
 

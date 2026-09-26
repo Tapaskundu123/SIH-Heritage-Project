@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.env
+.env.*
+!.env.example
+scratch/
+tests/
+models/
+*.log
+.git
+.gitignore
+# Exclude large model cache — mount as Docker volume instead
+.cache/

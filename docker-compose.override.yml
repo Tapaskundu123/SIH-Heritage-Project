@@ -1,0 +1,50 @@
+# ===========================================================
+# KarigarSetu — Docker Compose Dev Overrides
+#
+# Automatically merged by Docker Compose when running:
+#   docker compose up
+#
+# Provides live code reloading for local development.
+# ===========================================================
+
+services:
+
+  backend:
+    build:
+      target: builder          # Use builder stage (includes devDependencies)
+    environment:
+      NODE_ENV: development
+    volumes:
+      # Mount source code for live reload via ts-node-dev
+      - ./Backend/src:/app/src:ro
+    command: ["npx", "ts-node-dev", "--respawn", "--transpile-only", "src/index.ts"]
+
+  ai:
+    environment:
+      # In dev, reload on code changes (uvicorn --reload)
+      UVICORN_RELOAD: "true"
+    volumes:
+      # Mount individual source directories for live edit
+      # (avoid mounting entire /app to preserve installed pip packages)
+      - ./AI/main.py:/app/main.py:cached
+      - ./AI/config.py:/app/config.py:cached
+      - ./AI/routers:/app/routers:cached
+      - ./AI/services:/app/services:cached
+      - ./AI/models:/app/models:cached
+      # Model cache stays in named volume
+      - hf-model-cache:/app/.cache/huggingface
+    command:
+      ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  frontend:
+    build:
+      target: deps             # Only install deps — next dev handles build
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./Frontend/my-app:/app:cached
+      - /app/node_modules       # Prevent host node_modules from overwriting
+      - /app/.next              # Prevent .next from being overwritten
+    command: ["npm", "run", "dev"]
+    ports:
+      - "3000:3000"

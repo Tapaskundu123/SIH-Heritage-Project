@@ -369,7 +369,7 @@ def _generate_pricing_reasoning(
 # ─── Main Endpoint ────────────────────────────────────────────────────────────
 
 @router.post("/predict-siglip")
-async def predict_price_siglip(
+def predict_price_siglip(
     image: UploadFile = File(...),
     category: str = Form("other"),
     materials: str = Form(""),
@@ -391,7 +391,7 @@ async def predict_price_siglip(
     """
     logger.info(f"🧠 SigLIP+TabPFN price prediction for category={category}, technique={craft_technique}")
 
-    image_bytes = await image.read()
+    image_bytes = image.file.read()
     if len(image_bytes) > 30 * 1024 * 1024:
         raise HTTPException(400, "Image too large — max 30MB")
 

@@ -81,15 +81,22 @@ async def transcribe_audio(
         transcript = asr_result["text"]
         detected_lang = asr_result.get("language", language or "hi")
 
-        # Step 2: Translation to Dual Language (Hindi + English) via IndicTrans2 / NLLB
+        # Free GPU before Step 2
+        from services.gpu_manager import release_gpu
+        release_gpu("Post-ASR Sequential Handoff")
+
+        # Step 2: Translation to Dual Language (Hindi + English) via IndicTrans2 / Translation Service
         logger.info(f"🌐 Step 2: Translation pipeline from '{detected_lang}' to English and Hindi...")
         dual_text = trans_engine.translate_to_dual(transcript, source_lang=detected_lang)
 
         text_en = dual_text.get("english", transcript)
         text_hi = dual_text.get("hindi", transcript)
 
-        # Step 3: Structured Specs Extraction via Qwen 2.5 3B
-        logger.info("🧠 Step 3: Qwen 2.5 3B structured specs extraction...")
+        # Free GPU before Step 3
+        release_gpu("Post-Translation Sequential Handoff")
+
+        # Step 3: Structured Specs Extraction via Qwen 2.5 3B (Runs local offline or fallback)
+        logger.info("🧠 Step 3: Qwen 2.5 3B structured specs extraction (Sequential)...")
         product_info = qwen_engine.extract(text_en=text_en, text_hi=text_hi)
 
         return {
@@ -127,6 +134,16 @@ async def transcribe_audio(
                 os.unlink(tmp_path)
             except Exception:
                 pass
+
+
+@router.get("/qwen/status")
+async def qwen_status(request: Request):
+    """
+    Check Qwen 2.5 3B local offline model status, file count, and inference mode.
+    """
+    from services.qwen_extraction_service import QwenExtractionService
+    qwen = getattr(request.app.state, "qwen_extractor", None) or QwenExtractionService()
+    return qwen.check_local_status()
 
 
 @router.get("/indic-conformer/status")

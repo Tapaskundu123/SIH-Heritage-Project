@@ -43,7 +43,7 @@ GI_TAG_PREMIUM = 1.35  # 35% premium for GI-tagged products
 
 
 @router.post("/suggest")
-async def suggest_pricing(body: PricingRequest):
+def suggest_pricing(body: PricingRequest):
     """
     Calculate dynamic pricing based on costs, region, category, and quality.
     Returns suggested price with full breakdown and market insights.
@@ -71,12 +71,24 @@ async def suggest_pricing(body: PricingRequest):
 
     insights = _generate_insights(body, suggested, base_cost)
 
+    reasoning = f"Calculated based on {body.labor_hours}h craftsmanship, materials, and regional benchmarks for {body.category}."
+
     return {
         "success": True,
+        "suggested_price": round(suggested),
+        "recommended_price": round(suggested),
+        "min_price": round(min_price),
+        "max_price": round(max_price),
+        "price_range": {"min": round(min_price), "max": round(max_price)},
+        "reasoning": reasoning,
+        "market_insights": insights,
         "data": {
             "suggested_price": round(suggested),
+            "recommended_price": round(suggested),
             "min_price": round(min_price),
             "max_price": round(max_price),
+            "price_range": {"min": round(min_price), "max": round(max_price)},
+            "reasoning": reasoning,
             "platform_prices": platform_prices,
             "breakdown": {
                 "material_cost": round(body.material_cost),
@@ -88,6 +100,7 @@ async def suggest_pricing(body: PricingRequest):
                 "gi_premium_applied": body.has_gi_tag,
             },
             "insights": insights,
+            "market_insights": insights,
             "roi_percent": round(((suggested - base_cost) / base_cost) * 100, 1),
         }
     }

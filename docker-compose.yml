@@ -1,0 +1,155 @@
+# ===========================================================
+# KarigarSetu — Docker Compose (Production)
+#
+# Usage:
+#   cp .env.compose .env.compose.local   # fill in secrets
+#   docker compose --env-file .env.compose.local up -d
+#
+# Services:
+#   backend   Node.js/Express API        → http://localhost:5000
+#   ai        FastAPI AI Service         → http://localhost:8000
+#   frontend  Next.js Web App            → http://localhost:3000
+#
+# MongoDB Atlas is external (cloud) — no container needed.
+# ===========================================================
+
+# --------------- Shared network ---------------
+networks:
+  karigarsetu-net:
+    driver: bridge
+
+# --------------- Named volumes ---------------
+volumes:
+  # AI model cache — survives container restarts
+  hf-model-cache:
+    driver: local
+  # Backend file uploads
+  backend-uploads:
+    driver: local
+
+# ===============================================================
+# SERVICES
+# ===============================================================
+services:
+
+  # -----------------------------------------------------------
+  # Backend — Node.js / Express / TypeScript API
+  # -----------------------------------------------------------
+  backend:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: production
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-karigarsetu}/karigarsetu-backend:${IMAGE_TAG:-latest}
+    container_name: karigarsetu-backend
+    restart: unless-stopped
+    env_file:
+      - .env.compose
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      # Override AI_SERVICE_URL to use internal Docker DNS
+      AI_SERVICE_URL: http://ai:8000
+      # Override CORS_ORIGIN to allow the frontend container
+      CORS_ORIGIN: http://frontend:3000,http://localhost:3000,${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - "5000:5000"
+    volumes:
+      - backend-uploads:/app/uploads
+    networks:
+      - karigarsetu-net
+    depends_on:
+      ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # -----------------------------------------------------------
+  # AI Service — FastAPI / Python (CPU default)
+  # For GPU: uncomment the deploy section below
+  # -----------------------------------------------------------
+  ai:
+    build:
+      context: ./AI
+      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-karigarsetu}/karigarsetu-ai:${IMAGE_TAG:-latest}
+    container_name: karigarsetu-ai
+    restart: unless-stopped
+    env_file:
+      - .env.compose
+    environment:
+      HF_HOME: /app/.cache/huggingface
+      TRANSFORMERS_CACHE: /app/.cache/huggingface
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist downloaded models across restarts
+      - hf-model-cache:/app/.cache/huggingface
+    networks:
+      - karigarsetu-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # ---- GPU Support (requires NVIDIA Container Toolkit) ----
+    # Uncomment the block below to enable GPU pass-through:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # -----------------------------------------------------------
+  # Frontend — Next.js 16 Web App
+  # -----------------------------------------------------------
+  frontend:
+    build:
+      context: ./Frontend/my-app
+      dockerfile: Dockerfile
+      target: runner
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5000}
+        NEXT_PUBLIC_AI_URL: ${NEXT_PUBLIC_AI_URL:-http://localhost:8000}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-karigarsetu}/karigarsetu-frontend:${IMAGE_TAG:-latest}
+    container_name: karigarsetu-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3000:3000"
+    networks:
+      - karigarsetu-net
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

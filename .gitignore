@@ -1,0 +1,31 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.compose
+!.env.example
+.env.compose.local
+
+# Logs and build artifacts
+*.log
+docker_build_log.txt
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
