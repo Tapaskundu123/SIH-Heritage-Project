@@ -42,7 +42,7 @@ export default function InventoryPage() {
         setLoading(false);
         return;
       }
-      const res = await axios.get("http://localhost:5000/api/inventory", {
+      const res = await axios.get("/api/inventory", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success && Array.isArray(res.data.data)) {
@@ -62,7 +62,7 @@ export default function InventoryPage() {
     setUpdating(true);
     try {
       const token = localStorage.getItem("ks_token");
-      await axios.post("http://localhost:5000/api/inventory/update", {
+      await axios.post("/api/inventory/update", {
         productId: updateModal.item.productId._id,
         type: updateModal.type === "in" ? "stock_in" : updateModal.type === "out" ? "stock_out" : "adjustment",
         quantity: Number(updateQty),

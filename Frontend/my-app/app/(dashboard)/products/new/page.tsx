@@ -42,7 +42,7 @@ export default function NewProductPage() {
       formData.set("materials", form.materials.split(",").map(s => s.trim()).join(","));
       formData.set("tags", form.tags.split(",").map(s => s.trim()).join(","));
 
-      await axios.post("http://localhost:5000/api/products", {
+      await axios.post("/api/products", {
         ...form,
         price: Number(form.price) || 0,
         stock: Number(form.stock) > 0 ? Number(form.stock) : 10,

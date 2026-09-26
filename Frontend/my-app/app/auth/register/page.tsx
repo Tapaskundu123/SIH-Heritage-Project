@@ -88,7 +88,7 @@ export default function RegisterPage() {
         };
       }
 
-      const res = await axios.post("http://localhost:5000/api/auth/register", payload);
+      const res = await axios.post("/api/auth/register", payload);
       if (res.data.success) {
         const registeredUser = {
           ...res.data.data.user,

@@ -47,7 +47,7 @@ export default function MarketplacePage() {
       if (category !== "All") params.append("category", category);
       params.append("limit", "12");
 
-      const res = await axios.get(`http://localhost:5000/api/marketplace?${params}`);
+      const res = await axios.get(`/api/marketplace?${params}`);
       if (res.data.success && res.data.data.length > 0) {
         setProducts(res.data.data);
       } else {

@@ -191,7 +191,7 @@ export default function VoiceCatalogerPage() {
       await new Promise((r) => setTimeout(r, 300));
       setStage("extracting");
 
-      const res = await axios.post("http://localhost:5000/api/ai/voice/transcribe", formData, {
+      const res = await axios.post("/api/ai/voice/transcribe", formData, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "multipart/form-data",
@@ -253,7 +253,7 @@ export default function VoiceCatalogerPage() {
   const handleSaveProduct = async () => {
     try {
       const token = localStorage.getItem("ks_token");
-      await axios.post("http://localhost:5000/api/products", {
+      await axios.post("/api/products", {
         ...editedProduct,
         materials: String(editedProduct?.materials || "").split(",").map((m: string) => m.trim()).filter(Boolean),
         colors: String(editedProduct?.colors || "").split(",").map((c: string) => c.trim()).filter(Boolean),

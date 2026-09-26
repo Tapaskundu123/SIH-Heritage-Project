@@ -48,15 +48,14 @@ const QUALITY_MULTIPLIERS: Record<string, number> = {
 
 export const suggestPrice = async (req: Request, res: Response): Promise<void> => {
   try {
-    const input: PricingInput = req.body;
-    const {
-      category = 'other',
-      materialCost = 0,
-      laborHours = 1,
-      laborRate,
-      region = 'default',
-      quality = 'standard',
-    } = input;
+    const input: any = req.body;
+    const category = input.category || 'other';
+    const materialCost = Number(input.materialCost ?? input.material_cost ?? 0);
+    const laborHours = Number(input.laborHours ?? input.labor_hours ?? 1);
+    const laborRate = input.laborRate ?? input.labor_rate;
+    const region = input.region || 'default';
+    const quality = input.quality || 'standard';
+    const hasGITag = Boolean(input.hasGITag ?? input.has_gi_tag ?? false);
 
     const effectiveLaborRate = laborRate || REGIONAL_LABOR_RATES[region] || REGIONAL_LABOR_RATES['default'];
     const laborCost = laborHours * effectiveLaborRate;
@@ -64,27 +63,56 @@ export const suggestPrice = async (req: Request, res: Response): Promise<void> =
     const baseCost = materialCost + laborCost + overhead;
 
     const margin = CATEGORY_MARGINS[category] || 2.2;
-    const qualityMultiplier = QUALITY_MULTIPLIERS[quality] || 1.3;
+    const qualityMultiplier = QUALITY_MULTIPLIERS[quality as keyof typeof QUALITY_MULTIPLIERS] || 1.3;
+    const giMultiplier = hasGITag ? 1.35 : 1.0;
 
-    const suggestedPrice = Math.ceil(baseCost * margin * qualityMultiplier);
+    const suggestedPrice = Math.ceil(baseCost * margin * qualityMultiplier * giMultiplier);
     const minPrice = Math.ceil(baseCost * 1.2); // 20% above cost
-    const maxPrice = Math.ceil(baseCost * margin * qualityMultiplier * 1.3);
+    const maxPrice = Math.ceil(suggestedPrice * 1.3);
+
+    const platform_prices = {
+      direct_sale: suggestedPrice,
+      marketplace: Math.ceil(suggestedPrice * 0.85),
+      b2b_bulk: Math.ceil(suggestedPrice * 0.70),
+      export: Math.ceil(suggestedPrice * 1.5),
+    };
+
+    const roi_percent = baseCost > 0 ? Math.round(((suggestedPrice - baseCost) / baseCost) * 100) : 150;
 
     res.json({
       success: true,
+      suggested_price: suggestedPrice,
+      suggestedPrice,
+      min_price: minPrice,
+      minPrice,
+      max_price: maxPrice,
+      maxPrice,
+      platform_prices,
+      roi_percent,
       data: {
         suggestedPrice,
+        suggested_price: suggestedPrice,
         minPrice,
+        min_price: minPrice,
         maxPrice,
+        max_price: maxPrice,
+        platform_prices,
+        roi_percent,
         breakdown: {
           materialCost: Math.round(materialCost),
+          material_cost: Math.round(materialCost),
           laborCost: Math.round(laborCost),
+          labor_cost: Math.round(laborCost),
           overhead: Math.round(overhead),
           totalCost: Math.round(baseCost),
+          total_cost: Math.round(baseCost),
           margin: `${Math.round((margin - 1) * 100)}%`,
+          margin_percent: Math.round((margin - 1) * 100),
           qualityMultiplier,
+          quality_multiplier: qualityMultiplier,
+          gi_premium_applied: hasGITag,
         },
-        insights: generatePricingInsights(input, suggestedPrice),
+        insights: generatePricingInsights({ ...input, hasGITag, category, materialCost, laborHours, region, quality }, suggestedPrice),
       },
     });
   } catch (error) {

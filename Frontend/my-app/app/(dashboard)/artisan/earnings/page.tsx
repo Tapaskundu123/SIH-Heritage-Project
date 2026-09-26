@@ -49,7 +49,7 @@ export default function ArtisanEarningsPage() {
         setLoading(false);
         return;
       }
-      const res = await axios.get("http://localhost:5000/api/orders/artisan/earnings", {
+      const res = await axios.get("/api/orders/artisan/earnings", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.data.success && res.data.data) {

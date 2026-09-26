@@ -237,7 +237,7 @@ export default function ProductDetailPage() {
     const fetchProduct = async () => {
       try {
         const token = typeof window !== "undefined" ? localStorage.getItem("ks_token") : null;
-        const res = await axios.get(`http://localhost:5000/api/products/${productId}`, {
+        const res = await axios.get(`/api/products/${productId}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.data.success && res.data.data) {
@@ -272,7 +272,7 @@ export default function ProductDetailPage() {
     try {
       const token = localStorage.getItem("ks_token");
       await axios.put(
-        `http://localhost:5000/api/products/${product._id}`,
+        `/api/products/${product._id}`,
         { isPublished: newStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );

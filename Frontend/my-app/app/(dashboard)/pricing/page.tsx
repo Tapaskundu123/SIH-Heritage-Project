@@ -62,7 +62,7 @@ export default function PricingPage() {
     setError("");
     try {
       const token = localStorage.getItem("ks_token");
-      const res = await axios.post("http://localhost:5000/api/pricing/suggest", {
+      const res = await axios.post("/api/pricing/suggest", {
         category: form.category,
         material_cost: Number(form.materialCost),
         labor_hours: Number(form.laborHours),

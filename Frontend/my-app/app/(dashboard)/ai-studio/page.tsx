@@ -18,8 +18,8 @@ import OnboardingPipelineBanner from "../../components/onboarding-pipeline-banne
 // AI service runs on port 8000 directly.
 // Prefer 127.0.0.1 to avoid Windows localhost resolving to IPv6 [::1] where Uvicorn does not bind by default.
 const DEFAULT_AI_BASE =
-  process.env.NEXT_PUBLIC_AI_URL?.replace("localhost", "127.0.0.1") ||
-  "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_AI_URL ||
+  (typeof window !== "undefined" ? "" : "http://127.0.0.1:8000");
 
 type ProcessStep = "original" | "bg-removed" | "enhanced" | "ecommerce";
 type Operation = "remove_bg" | "enhance" | "ecommerce" | "all";
@@ -349,7 +349,7 @@ export default function AIStudioPage() {
       }
 
       await axios.post(
-        `http://localhost:5000/api/products/${targetProductId}/images`,
+        `/api/products/${targetProductId}/images`,
         { images: imagesToAttach },
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );

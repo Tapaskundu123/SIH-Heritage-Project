@@ -88,7 +88,7 @@ export default function ProductsPage() {
           setLoading(false);
           return;
         }
-        const res = await axios.get("http://localhost:5000/api/products", {
+        const res = await axios.get("/api/products", {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.data.success && Array.isArray(res.data.data)) {
@@ -118,7 +118,7 @@ export default function ProductsPage() {
     try {
       const token = localStorage.getItem("ks_token");
       await axios.put(
-        `http://localhost:5000/api/products/${id}`,
+        `/api/products/${id}`,
         { isPublished: !current },
         { headers: { Authorization: `Bearer ${token}` } }
       );

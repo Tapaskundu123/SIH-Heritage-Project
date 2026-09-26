@@ -68,7 +68,7 @@ export default function ArtisanOrdersPage() {
         setOrders([]);
         return;
       }
-      const res = await axios.get("http://localhost:5000/api/orders/artisan", {
+      const res = await axios.get("/api/orders/artisan", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.data.success && Array.isArray(res.data.data)) {
@@ -88,7 +88,7 @@ export default function ArtisanOrdersPage() {
     try {
       const token = localStorage.getItem("ks_token");
       await axios.patch(
-        `http://localhost:5000/api/orders/${orderId}/status`,
+        `/api/orders/${orderId}/status`,
         { status, ...extra },
         { headers: { Authorization: `Bearer ${token}` } }
       );

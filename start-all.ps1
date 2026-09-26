@@ -48,14 +48,24 @@ Write-Host "✅ Frontend starting on http://localhost:3000" -ForegroundColor Gre
 Write-Host ""
 
 # ---- Summary ----
-Write-Host "╔═══════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "║           All Services Started!       ║" -ForegroundColor Green
-Write-Host "╠═══════════════════════════════════════╣" -ForegroundColor Green
-Write-Host "║  🌐 Frontend:  http://localhost:3000  ║" -ForegroundColor White
-Write-Host "║  🖥️  Backend:   http://localhost:5000  ║" -ForegroundColor White
-Write-Host "║  🤖 AI:        http://localhost:8000  ║" -ForegroundColor White
-Write-Host "║  📖 AI Docs:   http://localhost:8000/docs ║" -ForegroundColor White
-Write-Host "╚═══════════════════════════════════════╝" -ForegroundColor Green
+$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -like "*Wi-Fi*" -or $_.InterfaceAlias -like "*Ethernet*" } | Select-Object -ExpandProperty IPAddress -First 1)
+if (-not $ip) { $ip = "192.168.29.249" }
+
+Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "║              KarigarSetu Services Online!                ║" -ForegroundColor Green
+Write-Host "╠═══════════════════════════════════════════════════════════╣" -ForegroundColor Green
+Write-Host "║  🌐 Local Web App:     http://localhost:3000              ║" -ForegroundColor White
+Write-Host "║  📱 Shareable Web App: http://${ip}:3000        ║" -ForegroundColor Yellow
+Write-Host "║  🖥️  Backend API:       http://localhost:5000              ║" -ForegroundColor White
+Write-Host "║  🤖 AI Service:        http://localhost:8000              ║" -ForegroundColor White
+Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host ""
+Write-Host "📲 To share Mobile App (Expo) with others on same Wi-Fi:" -ForegroundColor Cyan
+Write-Host "   cd Frontend\mobile-app; npx expo start --lan" -ForegroundColor White
+Write-Host "   Share QR Code or Link: exp://${ip}:8081" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "🌍 To share Mobile App with anyone anywhere (Internet):" -ForegroundColor Cyan
+Write-Host "   cd Frontend\mobile-app; npx expo start --tunnel" -ForegroundColor White
 Write-Host ""
 Write-Host "Opening browser..." -ForegroundColor Cyan
 Start-Sleep 3

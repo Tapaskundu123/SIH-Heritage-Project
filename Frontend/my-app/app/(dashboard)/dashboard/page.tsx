@@ -54,7 +54,7 @@ export default function DashboardPage() {
   const fetchStats = async () => {
     try {
       const token = localStorage.getItem("ks_token");
-      const res = await axios.get("http://localhost:5000/api/products/dashboard/stats", {
+      const res = await axios.get("/api/products/dashboard/stats", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.data.success) {

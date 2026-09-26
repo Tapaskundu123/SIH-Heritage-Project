@@ -33,7 +33,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const res = await axios.post("http://localhost:5000/api/auth/login", form);
+      const res = await axios.post("/api/auth/login", form);
       if (res.data.success && res.data.data?.token) {
         const userObj = res.data.data.user;
         const resolvedRole = userObj?.role || "artisan";

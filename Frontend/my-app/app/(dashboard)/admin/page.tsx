@@ -109,10 +109,10 @@ export default function AdminDashboardPage() {
 
     try {
       const [analyticsRes, usersRes, productsRes, ordersRes] = await Promise.allSettled([
-        axios.get("http://localhost:5000/api/admin/analytics", { headers }),
-        axios.get("http://localhost:5000/api/admin/users", { headers }),
-        axios.get("http://localhost:5000/api/admin/products", { headers }),
-        axios.get("http://localhost:5000/api/orders/admin/all", { headers }),
+        axios.get("/api/admin/analytics", { headers }),
+        axios.get("/api/admin/users", { headers }),
+        axios.get("/api/admin/products", { headers }),
+        axios.get("/api/orders/admin/all", { headers }),
       ]);
 
       if (analyticsRes.status === "fulfilled" && analyticsRes.value.data.success) {
@@ -138,7 +138,7 @@ export default function AdminDashboardPage() {
     try {
       const token = localStorage.getItem("ks_token");
       const res = await axios.patch(
-        `http://localhost:5000/api/admin/users/${userId}/verify`,
+        `/api/admin/users/${userId}/verify`,
         { isVerified: !currentStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -160,7 +160,7 @@ export default function AdminDashboardPage() {
     if (!confirm("Are you sure you want to remove this user from the platform?")) return;
     try {
       const token = localStorage.getItem("ks_token");
-      await axios.delete(`http://localhost:5000/api/admin/users/${userId}`, {
+      await axios.delete(`/api/admin/users/${userId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUsers((prev) => prev.filter((u) => u._id !== userId));
@@ -173,7 +173,7 @@ export default function AdminDashboardPage() {
     if (!confirm("Remove product from public marketplace?")) return;
     try {
       const token = localStorage.getItem("ks_token");
-      await axios.delete(`http://localhost:5000/api/admin/products/${productId}`, {
+      await axios.delete(`/api/admin/products/${productId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setProducts((prev) => prev.filter((p) => p._id !== productId));

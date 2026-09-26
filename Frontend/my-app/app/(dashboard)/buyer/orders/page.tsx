@@ -72,7 +72,7 @@ export default function BuyerOrdersPage() {
         setOrders([]);
         return;
       }
-      const res = await axios.get("http://localhost:5000/api/orders/my-orders", {
+      const res = await axios.get("/api/orders/my-orders", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.data.success && Array.isArray(res.data.data)) {

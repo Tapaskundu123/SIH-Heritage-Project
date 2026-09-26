@@ -59,7 +59,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (token) {
       // Validate token with real backend profile endpoint
       axios
-        .get("http://localhost:5000/api/auth/profile", {
+        .get("/api/auth/profile", {
           headers: { Authorization: `Bearer ${token}` },
         })
         .then((res) => {

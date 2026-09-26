@@ -13,8 +13,8 @@ import { useOnboardingPipeline, PredictedPrice } from "../../../hooks/use-onboar
 import OnboardingPipelineBanner from "../../../components/onboarding-pipeline-banner";
 
 const AI_BASE =
-  process.env.NEXT_PUBLIC_AI_URL?.replace("localhost", "127.0.0.1") ||
-  "http://127.0.0.1:8000";
+  process.env.NEXT_PUBLIC_AI_URL ||
+  (typeof window !== "undefined" ? "" : "http://127.0.0.1:8000");
 
 // ─── Processing stages for SigLIP + TabPFN pipeline animation ────────────────
 const MODEL_STAGES = [
@@ -101,7 +101,7 @@ export default function PricePredictionPage() {
         setModelProgress({ stage: 3, done: [1, 2] });
 
         try {
-          const res = await axios.post(`http://localhost:5000/api/pricing/suggest`, {
+          const res = await axios.post(`/api/pricing/suggest`, {
             category: manualForm.category,
             materialCost: materialCost,
             laborHours: Number(manualForm.laborHours) || 1,
@@ -269,7 +269,7 @@ export default function PricePredictionPage() {
         stock: 10,
       };
 
-      const res = await axios.post("http://localhost:5000/api/products", payload, {
+      const res = await axios.post("/api/products", payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
 

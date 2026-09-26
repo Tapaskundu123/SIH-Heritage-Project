@@ -80,7 +80,7 @@ function CheckoutContent() {
         payImmediately: paymentMethod !== "cod",
       };
 
-      const res = await axios.post("http://localhost:5000/api/orders", payload, {
+      const res = await axios.post("/api/orders", payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
