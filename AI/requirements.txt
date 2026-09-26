@@ -30,6 +30,8 @@ opencv-python-headless==4.10.0.82
 # CPU-compatible rembg (no GPU dependency)
 rembg==2.0.57
 onnxruntime==1.18.0
+kornia>=0.7.3
+timm>=0.9.16
 
 # Language Detection
 langdetect==1.0.9

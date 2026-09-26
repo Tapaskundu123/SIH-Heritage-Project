@@ -167,6 +167,8 @@ def _get_model():
         )
         if DEVICE != "cpu":
             _model = _model.half()
+        else:
+            _model = _model.float()
         _model.eval()
 
     if DEVICE == "cuda":
@@ -194,6 +196,8 @@ def _remove_background_pil(image: Image.Image) -> Image.Image:
     image_tensor = preprocessor.proc(image).unsqueeze(0).to(DEVICE)
     if DEVICE != "cpu":
         image_tensor = image_tensor.half()
+    else:
+        image_tensor = image_tensor.float()
 
     try:
         with torch.no_grad():
