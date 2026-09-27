@@ -6,7 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import api from '../../constants/api';
+import api, { resolveImageUrl } from '../../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../../constants/theme';
 import LoadingShimmer from '../../components/LoadingShimmer';
 
@@ -50,16 +50,18 @@ export default function MarketplaceScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity style={styles.card} activeOpacity={0.88} onPress={() => {}}>
-      <View style={styles.cardImage}>
-        {item.images?.[0]?.url ? (
-          <Image source={{ uri: item.images[0].url }} style={styles.cardImg} />
-        ) : (
-          <View style={styles.cardImgPlaceholder}>
-            <Feather name="image" size={24} color={Colors.textDim} />
-          </View>
-        )}
+  const renderItem = ({ item }: { item: any }) => {
+    const imgUrl = resolveImageUrl(item.images?.[0]?.url);
+    return (
+      <TouchableOpacity style={styles.card} activeOpacity={0.88} onPress={() => {}}>
+        <View style={styles.cardImage}>
+          {imgUrl ? (
+            <Image source={{ uri: imgUrl }} style={styles.cardImg} />
+          ) : (
+            <View style={styles.cardImgPlaceholder}>
+              <Feather name="image" size={24} color={Colors.textDim} />
+            </View>
+          )}
         <View style={styles.categoryBadge}>
           <Text style={styles.categoryBadgeText}>{item.category}</Text>
         </View>
@@ -86,7 +88,8 @@ export default function MarketplaceScreen() {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>

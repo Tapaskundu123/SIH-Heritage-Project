@@ -1,4 +1,7 @@
 import { Request, Response } from 'express';
+import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs';
 
 interface PricingInput {
   category: string;
@@ -46,6 +49,42 @@ const QUALITY_MULTIPLIERS: Record<string, number> = {
   luxury: 2.8,
 };
 
+export const predictSiglip = async (req: Request, res: Response): Promise<void> => {
+  const AI_BASE = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+  try {
+    if (!req.file) {
+      return suggestPrice(req, res);
+    }
+
+    const form = new FormData();
+    form.append('image', fs.createReadStream(req.file.path), {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+
+    for (const key of Object.keys(req.body)) {
+      form.append(key, String(req.body[key]));
+    }
+
+    const response = await axios.post(`${AI_BASE}/ai/pricing/predict-siglip`, form, {
+      headers: form.getHeaders(),
+      timeout: 60000,
+    });
+
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.json(response.data);
+  } catch (error: any) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.warn('SigLIP multimodal pricing failed, falling back to dynamic rule pricing:', error?.message);
+    return suggestPrice(req, res);
+  }
+};
+
 export const suggestPrice = async (req: Request, res: Response): Promise<void> => {
   try {
     const input: any = req.body;
@@ -56,6 +95,29 @@ export const suggestPrice = async (req: Request, res: Response): Promise<void> =
     const region = input.region || 'default';
     const quality = input.quality || 'standard';
     const hasGITag = Boolean(input.hasGITag ?? input.has_gi_tag ?? false);
+
+    // Try calling Python AI service pricing endpoint first for AI reasoning
+    const AI_BASE = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+    let aiReasoning: string | null = null;
+    let aiInsights: string[] = [];
+    try {
+      const aiRes = await axios.post(`${AI_BASE}/ai/pricing/suggest`, {
+        category,
+        material_cost: materialCost,
+        labor_hours: laborHours,
+        region,
+        quality,
+        has_gi_tag: hasGITag,
+      }, { timeout: 8000 });
+      if (aiRes.data?.success) {
+        aiReasoning = aiRes.data?.reasoning || aiRes.data?.data?.reasoning;
+        if (Array.isArray(aiRes.data?.market_insights)) {
+          aiInsights = aiRes.data.market_insights;
+        }
+      }
+    } catch {
+      // AI service optional fallback
+    }
 
     const effectiveLaborRate = laborRate || REGIONAL_LABOR_RATES[region] || REGIONAL_LABOR_RATES['default'];
     const laborCost = laborHours * effectiveLaborRate;
@@ -112,7 +174,11 @@ export const suggestPrice = async (req: Request, res: Response): Promise<void> =
           quality_multiplier: qualityMultiplier,
           gi_premium_applied: hasGITag,
         },
-        insights: generatePricingInsights({ ...input, hasGITag, category, materialCost, laborHours, region, quality }, suggestedPrice),
+        reasoning: aiReasoning || `Calculated based on ${laborHours}h craftsmanship, ₹${materialCost} materials, and ${region} fair-wage benchmark.`,
+        insights: [
+          ...aiInsights,
+          ...generatePricingInsights({ ...input, hasGITag, category, materialCost, laborHours, region, quality }, suggestedPrice),
+        ],
       },
     });
   } catch (error) {

@@ -5,6 +5,7 @@ import {
   extractProductInfo,
   removeBackground,
   enhanceImage,
+  processCompleteImage,
   generateCatalog,
   aiHealth,
   processStudioAndSaveDraft,
@@ -18,10 +19,12 @@ const router = Router();
 
 router.get('/health', aiHealth);
 router.post('/voice/transcribe', optionalAuthenticate, upload.single('audio'), transcribeVoice);
-router.post('/voice/extract-product', authenticate, extractProductInfo);
-router.post('/image/remove-bg', authenticate, upload.single('image'), removeBackground);
-router.post('/image/enhance', authenticate, upload.single('image'), enhanceImage);
-router.post('/catalog/generate', authenticate, generateCatalog);
+router.post('/voice/extract-product', optionalAuthenticate, extractProductInfo);
+router.post('/image/remove-bg', optionalAuthenticate, upload.single('image'), removeBackground);
+router.post('/image/enhance', optionalAuthenticate, upload.single('image'), enhanceImage);
+router.post('/image/process-complete', optionalAuthenticate, upload.single('image'), processCompleteImage);
+router.post('/catalog/generate', optionalAuthenticate, generateCatalog);
+
 
 // AI Studio + Draft Storage & Product Specs Integration
 router.post('/image/studio-save-draft', authenticate, upload.single('image'), processStudioAndSaveDraft);

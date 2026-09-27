@@ -35,7 +35,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import axios from 'axios';
-import api, { AI_URL, BASE_URL } from '../constants/api';
+import api, { AI_URL, BASE_URL, apiPostWithFallback } from '../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
@@ -246,47 +246,66 @@ export default function PricingScreen() {
       let data: any = null;
       let usedModel = 'SigLIP-768 + TabPFN';
 
-      // 1. Try Backend suggest route
-      try {
-        const res = await api.post('/pricing/suggest', {
-          category: form.category,
-          material_cost: matCost,
-          materialCost: matCost,
-          labor_hours: hrs,
-          laborHours: hrs,
-          region: form.region,
-          quality: form.quality,
-          has_gi_tag: form.hasGITag,
-          hasGITag: form.hasGITag,
-        }, { timeout: 15000 });
+      // 1. If an image is available from Step 1 (AI Studio), try SigLIP multimodal AI pricing
+      const imageUri = pipeline.studioImages?.ecommerce || pipeline.studioImages?.localUri;
+      if (imageUri) {
+        try {
+          const fd = new FormData();
+          fd.append('image', {
+            uri: imageUri,
+            name: 'product.jpg',
+            type: 'image/jpeg',
+          } as any);
+          fd.append('category', form.category);
+          fd.append('materials', pipeline.voiceSpecs?.materials ? (Array.isArray(pipeline.voiceSpecs.materials) ? pipeline.voiceSpecs.materials.join(', ') : String(pipeline.voiceSpecs.materials)) : '');
+          fd.append('craft_technique', pipeline.voiceSpecs?.craftTechnique || '');
+          fd.append('region', form.region);
+          fd.append('quality', form.quality);
+          fd.append('material_cost', String(matCost));
+          fd.append('labor_hours', String(hrs));
+          fd.append('has_gi_tag', String(form.hasGITag));
 
-        if (res.data?.success && (res.data?.data || res.data?.suggested_price || res.data?.suggestedPrice)) {
-          data = res.data.data || res.data;
-          usedModel = 'Dynamic Pricing Engine (Calibrated)';
+          const siglipRes = await apiPostWithFallback('/pricing/predict-siglip', fd, {
+            isFormData: true,
+            timeout: 30000,
+          });
+
+          if (siglipRes?.data?.success && siglipRes?.data?.data) {
+            data = siglipRes.data.data;
+            usedModel = data.model || 'SigLIP-768 + TabPFN (Multimodal AI)';
+          }
+        } catch (siglipErr) {
+          console.warn('SigLIP multimodal pricing skipped, falling back to dynamic pricing:', siglipErr);
         }
-      } catch (backendErr) {
-        console.warn('Backend /pricing/suggest error, attempting direct AI URL fallback:', backendErr);
       }
 
-      // 2. Fallback to direct AI service if backend didn't respond
+      // 2. If no image or SigLIP didn't respond, use backend dynamic pricing engine
       if (!data) {
         try {
-          const aiRes = await axios.post(`${AI_URL}/ai/pricing/suggest`, {
+          const res = await apiPostWithFallback('/pricing/suggest', {
             category: form.category,
             material_cost: matCost,
+            materialCost: matCost,
             labor_hours: hrs,
+            laborHours: hrs,
             region: form.region,
             quality: form.quality,
             has_gi_tag: form.hasGITag,
-          }, { timeout: 10000 });
+            hasGITag: form.hasGITag,
+          }, { timeout: 15000 });
 
-          if (aiRes.data?.success && aiRes.data?.data) {
-            data = aiRes.data.data;
-            usedModel = 'SigLIP + TabPFN Microservice';
+          if (res?.data?.success && (res?.data?.data || res?.data?.suggested_price || res?.data?.suggestedPrice)) {
+            data = res.data.data || res.data;
+            usedModel = 'Dynamic Pricing Engine (Calibrated)';
           }
-        } catch (aiErr) {
-          console.warn('Direct AI service pricing fallback:', aiErr);
+        } catch (backendErr) {
+          console.warn('Backend /pricing/suggest error:', backendErr);
         }
+      }
+
+      // If backend didn't respond, data stays null → local formula kicks in below (step 3)
+      if (!data) {
+        console.warn('Backend /pricing/suggest unavailable, using local formula fallback below.');
       }
 
       clearTimeout(t1);
@@ -307,10 +326,10 @@ export default function PricingScreen() {
       const qMult = QUAL_MULT[form.quality] || 1.3;
       const giMult = form.hasGITag ? 1.35 : 1.0;
 
-      const rawSuggested = data?.suggestedPrice || data?.suggested_price || Math.ceil(totalCost * 2.2 * qMult * giMult);
+      const rawSuggested = data?.suggestedPrice || data?.suggested_price || data?.predicted_price || Math.ceil(totalCost * 2.2 * qMult * giMult);
       const suggestedPrice = Math.max(150, rawSuggested);
-      const minPrice = data?.minPrice || data?.min_price || Math.ceil(totalCost * 1.25);
-      const maxPrice = data?.maxPrice || data?.max_price || Math.ceil(suggestedPrice * 1.3);
+      const minPrice = data?.minPrice || data?.min_price || data?.confidence_low || Math.ceil(totalCost * 1.25);
+      const maxPrice = data?.maxPrice || data?.max_price || data?.confidence_high || Math.ceil(suggestedPrice * 1.3);
 
       const platformPrices = data?.platform_prices || {
         direct_sale: suggestedPrice,
@@ -375,24 +394,115 @@ export default function PricingScreen() {
   };
 
   // ---------------------------------------------------------
-  // 1-Click "Create Product with this Price"
+  // 1-Click "List Product Directly to Marketplace"
+  // Automatically compiles AI Studio photo + Voice specs + Calibrated price
   // ---------------------------------------------------------
-  const handleCreateProduct = () => {
-    const finalPrice = result?.suggested_price || 2500;
-    const prefillData = {
-      name: pipeline.voiceSpecs?.name || 'Artisan Handcrafted Product',
-      category: selectedCategoryLabel,
-      price: finalPrice,
-      description: pipeline.voiceSpecs?.description || '',
-      materials: pipeline.voiceSpecs?.materials || '',
-      craftTechnique: pipeline.voiceSpecs?.craftTechnique || '',
-      image: pipeline.studioImages?.ecommerce || pipeline.studioImages?.localUri || '',
-    };
+  const [isListing, setIsListing] = useState(false);
 
-    router.push({
-      pathname: '/(tabs)/products/new',
-      params: { prefill: JSON.stringify(prefillData) },
-    } as any);
+  const handleListToMarketplace = async () => {
+    const finalPrice = result?.suggested_price || 2500;
+    const productName = pipeline.voiceSpecs?.name || `Artisan Handcrafted ${selectedCategoryLabel}`;
+    const description = pipeline.voiceSpecs?.description ||
+      `Authentic handcrafted ${selectedCategoryLabel} created with traditional Indian craftsmanship in ${form.region}.`;
+    const imageUri = pipeline.studioImages?.ecommerce || pipeline.studioImages?.enhanced || pipeline.studioImages?.localUri || '';
+
+    setIsListing(true);
+    try {
+      let res: any;
+      if (imageUri && imageUri.startsWith('data:image/')) {
+        // High-res Base64 from AI Studio: send as clean JSON payload (bypasses FormData bridge)
+        const payload: Record<string, any> = {
+          name: productName,
+          category: form.category,
+          price: finalPrice,
+          suggestedPrice: finalPrice,
+          description,
+          stock: 10,
+          region: form.region,
+          craftTechnique: pipeline.voiceSpecs?.craftTechnique || 'Handmade',
+          quality: form.quality,
+          isPublished: true,
+          image: imageUri,
+        };
+        if (pipeline.voiceSpecs?.materials) {
+          const mat = pipeline.voiceSpecs.materials;
+          payload.materials = Array.isArray(mat) ? mat.join(', ') : String(mat);
+        }
+        res = await apiPostWithFallback('/products', payload, {
+          isFormData: false,
+          timeout: 45000,
+        });
+      } else {
+        // Multipart file URI upload
+        const fd = new FormData();
+        fd.append('name', productName);
+        fd.append('category', form.category);
+        fd.append('price', String(finalPrice));
+        fd.append('suggestedPrice', String(finalPrice));
+        fd.append('description', description);
+        fd.append('stock', '10');
+        fd.append('region', form.region);
+        fd.append('craftTechnique', pipeline.voiceSpecs?.craftTechnique || 'Handmade');
+        fd.append('quality', form.quality);
+        fd.append('isPublished', 'true');
+
+        if (pipeline.voiceSpecs?.materials) {
+          const mat = pipeline.voiceSpecs.materials;
+          fd.append('materials', Array.isArray(mat) ? mat.join(', ') : String(mat));
+        }
+
+        if (imageUri) {
+          fd.append('images', {
+            uri: imageUri,
+            name: 'product.jpg',
+            type: 'image/jpeg',
+          } as any);
+        }
+
+        if (pipeline.studioImages?.localUri && pipeline.studioImages.localUri !== imageUri) {
+          fd.append('images', {
+            uri: pipeline.studioImages.localUri,
+            name: 'original.jpg',
+            type: 'image/jpeg',
+          } as any);
+        }
+
+        res = await apiPostWithFallback('/products', fd, {
+          isFormData: true,
+          timeout: 45000,
+        });
+      }
+
+      if (res?.data?.success) {
+        const createdId = res.data?.data?._id || 'new';
+        if (pipeline.isOnboarding) {
+          pipeline.completeOnboarding(createdId);
+        }
+
+        Alert.alert(
+          '🎉 Listed to Marketplace!',
+          `Your product "${productName}" is now LIVE on the KarigarSetu marketplace for ₹${finalPrice.toLocaleString('en-IN')}.\n\nBuyers can now discover and purchase your craftsmanship!`,
+          [
+            {
+              text: 'View on Marketplace',
+              onPress: () => router.replace('/(tabs)/marketplace'),
+            },
+            {
+              text: 'Go to Dashboard',
+              onPress: () => router.replace('/(tabs)/dashboard'),
+            },
+          ]
+        );
+      } else {
+        throw new Error(res?.data?.message || 'Listing failed');
+      }
+    } catch (err: any) {
+      console.error('List product error:', err);
+      const msg = err?.response?.data?.message || err?.message || 'Could not list product to marketplace. Please try again.';
+      Alert.alert('Listing Error', msg);
+    } finally {
+      setIsListing(false);
+    }
   };
 
   const selectedCategoryLabel = CATEGORIES.find(c => c.id === form.category)?.label || 'Textiles & Sarees';
@@ -477,8 +587,9 @@ export default function PricingScreen() {
 
           {/* ------------------------------------------------------ */}
           {/* PRODUCT INPUT SUMMARY (IMAGE + SPECS SIDE BY SIDE)     */}
+          {/* Hidden once price is predicted                         */}
           {/* ------------------------------------------------------ */}
-          {hasPipelineData && (
+          {hasPipelineData && !result && (
             <GlassCard style={styles.summaryCard}>
               <Text style={styles.sectionHeaderTitle}>PRODUCT INPUT SUMMARY</Text>
               <View style={styles.summaryGrid}>
@@ -534,41 +645,45 @@ export default function PricingScreen() {
           {/* ------------------------------------------------------ */}
           {/* MODEL ARCHITECTURE COLLAPSIBLE CARDS                   */}
           {/* ------------------------------------------------------ */}
-          <GlassCard style={styles.archCard}>
-            <TouchableOpacity
-              style={styles.archHeader}
-              onPress={() => setShowArchInfo(!showArchInfo)}
-              activeOpacity={0.7}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Feather name="cpu" size={16} color={Colors.indigoLight} />
-                <Text style={styles.archHeaderTitle}>MODEL ARCHITECTURE (SIGLIP + TABPFN)</Text>
-              </View>
-              <Feather name={showArchInfo ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textDim} />
-            </TouchableOpacity>
+          {!result && (
+            <GlassCard style={styles.archCard}>
+              <TouchableOpacity
+                style={styles.archHeader}
+                onPress={() => setShowArchInfo(!showArchInfo)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Feather name="cpu" size={16} color={Colors.indigoLight} />
+                  <Text style={styles.archHeaderTitle}>MODEL ARCHITECTURE (SIGLIP + TABPFN)</Text>
+                </View>
+                <Feather name={showArchInfo ? 'chevron-up' : 'chevron-down'} size={16} color={Colors.textDim} />
+              </TouchableOpacity>
 
-            {showArchInfo && (
-              <View style={styles.archGrid}>
-                {MODEL_ARCH.map(m => (
-                  <View key={m.name} style={[styles.archTile, { borderColor: `${m.color}30` }]}>
-                    <Text style={styles.archIcon}>{m.icon}</Text>
-                    <Text style={[styles.archName, { color: m.color }]}>{m.name}</Text>
-                    <Text style={styles.archRole}>{m.role}</Text>
-                    <Text style={styles.archDesc}>{m.desc}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </GlassCard>
+              {showArchInfo && (
+                <View style={styles.archGrid}>
+                  {MODEL_ARCH.map(m => (
+                    <View key={m.name} style={[styles.archTile, { borderColor: `${m.color}30` }]}>
+                      <Text style={styles.archIcon}>{m.icon}</Text>
+                      <Text style={[styles.archName, { color: m.color }]}>{m.name}</Text>
+                      <Text style={styles.archRole}>{m.role}</Text>
+                      <Text style={styles.archDesc}>{m.desc}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </GlassCard>
+          )}
 
           {/* ------------------------------------------------------ */}
-          {/* PRODUCT DETAILS FORM (EXACT WEB APP PARITY)            */}
+          {/* PRODUCT DETAILS FORM (MANUAL ADD SECTION)              */}
+          {/* Automatically hidden once price is predicted!          */}
           {/* ------------------------------------------------------ */}
-          <GlassCard style={styles.formCard}>
-            <View style={styles.formHeaderRow}>
-              <Feather name="sliders" size={16} color={Colors.saffron} />
-              <Text style={styles.formHeaderTitle}>Product Details</Text>
-            </View>
+          {!result && (
+            <GlassCard style={styles.formCard}>
+              <View style={styles.formHeaderRow}>
+                <Feather name="sliders" size={16} color={Colors.saffron} />
+                <Text style={styles.formHeaderTitle}>Product Cost Details</Text>
+              </View>
 
             {/* 1. Category Dropdown */}
             <View style={styles.fieldGroup}>
@@ -760,6 +875,7 @@ export default function PricingScreen() {
               />
             )}
           </GlassCard>
+          )}
 
           {/* ------------------------------------------------------ */}
           {/* EMPTY STATE PLACEHOLDER (MATCHING WEB BEFORE RESULT)   */}
@@ -954,11 +1070,12 @@ export default function PricingScreen() {
                 </View>
               </GlassCard>
 
-              {/* 6. Primary Action Button */}
+              {/* 6. Primary Action Button (1-Click Marketplace Listing) */}
               <View style={{ marginTop: Spacing.md }}>
                 <GradientButton
-                  title="Create Product Listing & Go to Catalog →"
-                  onPress={handleCreateProduct}
+                  title={isListing ? 'Listing to Marketplace...' : '🚀 List Product to Marketplace Now'}
+                  onPress={handleListToMarketplace}
+                  disabled={isListing}
                 />
               </View>
 

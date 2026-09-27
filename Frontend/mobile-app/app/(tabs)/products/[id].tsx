@@ -6,7 +6,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import api from '../../../constants/api';
+import api, { resolveImageUrl } from '../../../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../../../constants/theme';
 import LoadingShimmer from '../../../components/LoadingShimmer';
 import Badge from '../../../components/Badge';
@@ -74,7 +74,7 @@ export default function ProductDetailScreen() {
         {/* Image Gallery */}
         <View style={styles.imageGallery}>
           {product.images?.length > 0 ? (
-            <Image source={{ uri: product.images[imageIndex]?.url }} style={styles.mainImage} />
+            <Image source={{ uri: resolveImageUrl(product.images[imageIndex]?.url) }} style={styles.mainImage} />
           ) : (
             <View style={[styles.mainImage, styles.imagePlaceholder]}>
               <Feather name="package" size={48} color={Colors.textDim} />

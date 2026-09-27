@@ -16,7 +16,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import api, { AI_URL, BASE_URL } from '../constants/api';
+import api, { AI_URL, BASE_URL, apiPostWithFallback } from '../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
 import GradientButton from '../components/GradientButton';
 import GlassCard from '../components/GlassCard';
@@ -321,26 +321,13 @@ export default function VoiceCatalogerScreen() {
         } as any);
       }
 
-      // Try Backend proxy first (routes through Cloudflare tunnel or local network reliably)
-      let res: any;
-      try {
-        res = await api.post('/ai/voice/transcribe', formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          timeout: 120000,
-        });
-      } catch (backendErr: any) {
-        console.warn('Backend proxy /api/ai/voice/transcribe error, trying direct AI URL fallback:', backendErr?.message);
-        // Fallback directly to AI service port 8000
-        res = await axios.post(`${AI_URL}/ai/voice/transcribe`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-          timeout: 120000,
-        });
-      }
+      // Multi-tier request: Cloudflare backend tunnel → Local Wi-Fi backend
+      // Both tiers internally proxy to the AI service at localhost:8000.
+      // Never calls AI_URL directly to prevent HTML Cloudflare error pages.
+      const res = await apiPostWithFallback('/ai/voice/transcribe', formData, {
+        timeout: 120000,
+        isFormData: true,
+      });
 
       const resData = res?.data;
       const pipe = resData?.data?.pipeline || resData?.pipeline || resData?.data || resData;
@@ -691,8 +678,14 @@ export default function VoiceCatalogerScreen() {
             {/* Use listing button */}
             <View style={styles.actionRow}>
               <GradientButton
-                title="Create Listing with this Data"
-                onPress={handleUseProduct}
+                title={pipeline.isOnboarding ? "Continue to AI Pricing →" : "Create Listing with this Data"}
+                onPress={() => {
+                  if (pipeline.isOnboarding) {
+                    router.push('/pricing');
+                  } else {
+                    handleUseProduct();
+                  }
+                }}
                 style={{ flex: 1 }}
               />
             </View>

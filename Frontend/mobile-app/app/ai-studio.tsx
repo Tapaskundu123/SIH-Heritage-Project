@@ -23,7 +23,7 @@ import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api, { AI_URL, BASE_URL } from '../constants/api';
+import api, { AI_URL, BASE_URL, apiPostWithFallback } from '../constants/api';
 import { Colors, Fonts, Spacing, Radius } from '../constants/theme';
 import GlassCard from '../components/GlassCard';
 import GradientButton from '../components/GradientButton';
@@ -31,9 +31,30 @@ import { useOnboardingPipeline } from '../constants/pipeline';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ---------------------------------------------------------
-// Types & Constants
-// ---------------------------------------------------------
+// Pure JS ArrayBuffer to Base64 (zero-dependency, native React Native/Hermes safe)
+function arrayBufferToBase64(data: any): string {
+  if (typeof data === 'string') return data;
+  if (!data) return '';
+  try {
+    const bytes = new Uint8Array(data);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let base64 = '';
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i += 3) {
+      const b0 = bytes[i];
+      const b1 = i + 1 < len ? bytes[i + 1] : 0;
+      const b2 = i + 2 < len ? bytes[i + 2] : 0;
+
+      base64 += chars[b0 >> 2];
+      base64 += chars[((b0 & 3) << 4) | (b1 >> 4)];
+      base64 += i + 1 < len ? chars[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+      base64 += i + 2 < len ? chars[b2 & 63] : '=';
+    }
+    return base64;
+  } catch {
+    return String(data);
+  }
+}
 
 type OperationId = 'remove_bg' | 'enhance' | 'all';
 type ViewTab = 'original' | 'bgRemoved' | 'enhanced' | 'ecommerce';
@@ -124,16 +145,12 @@ export default function AIStudioScreen() {
     (async () => {
       try {
         // Try backend AI health or direct AI health
-        const res = await api.get('/health', { timeout: 3500 }).catch(() => null);
-        if (res?.data?.status === 'ok' || res?.status === 200) {
-          setAiStatus('online');
-          return;
-        }
-        const directRes = await axios.get(`${AI_URL}/health`, { timeout: 3500 }).catch(() => null);
-        if (directRes?.data?.status === 'ok') {
+        // Check backend proxy health (which internally checks AI at localhost:8000)
+        const res = await api.get('/ai/health', { timeout: 4000 }).catch(() => null);
+        if (res?.data?.success || res?.status === 200) {
           setAiStatus('online');
         } else {
-          setAiStatus('online'); // default to optimistic online
+          setAiStatus('online'); // optimistic — show online by default
         }
       } catch {
         setAiStatus('online');
@@ -167,7 +184,7 @@ export default function AIStudioScreen() {
       }
 
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.95,
@@ -246,23 +263,12 @@ export default function AIStudioScreen() {
           setDoneStages([1, 2]);
         }, 7500);
 
-        // Try Backend tunnel proxy first
-        let res: any;
-        try {
-          res = await api.post('/ai/image/process-complete', formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            timeout: 180000,
-          });
-        } catch (backendErr: any) {
-          console.warn('Backend proxy /ai/image/process-complete error, trying direct AI URL:', backendErr?.message);
-          res = await axios.post(`${AI_URL}/ai/image/process-complete`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            timeout: 180000,
-          });
-        }
+        // Multi-tier: Cloudflare backend tunnel → Local Wi-Fi backend
+        // Backend internally proxies to AI at localhost:8000 — never call AI_URL directly.
+        const res = await apiPostWithFallback('/ai/image/process-complete', formData, {
+          timeout: 180000,
+          isFormData: true,
+        });
 
         clearTimeout(t1);
         clearTimeout(t2);
@@ -289,64 +295,32 @@ export default function AIStudioScreen() {
           });
         }
       } else if (selectedOp.id === 'remove_bg') {
-        let res: any;
-        try {
-          res = await api.post('/ai/image/remove-bg', formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            responseType: 'blob',
-            timeout: 120000,
-          });
-        } catch {
-          res = await axios.post(`${AI_URL}/ai/image/remove-bg`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            responseType: 'blob',
-            timeout: 120000,
-          });
-        }
-
-        const blob = res.data as Blob;
-        const reader = new FileReader();
-        const b64 = await new Promise<string>((resolve) => {
-          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(blob);
+        const res = await apiPostWithFallback('/ai/image/remove-bg', formData, {
+          timeout: 120000,
+          isFormData: true,
+          responseType: 'arraybuffer',
         });
 
-        const bgUrl = `data:image/png;base64,${b64}`;
+        // Convert ArrayBuffer → base64 cleanly without Node buffer
+        const b64 = arrayBufferToBase64(res.data);
+        const bgUrl = b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+
         setProcessedImages((prev) => ({ ...prev, bgRemoved: bgUrl }));
         setActiveTab('bgRemoved');
         setDoneStages([1]);
         setCurrentStage(0);
       } else {
         // Enhance
-        let res: any;
-        try {
-          res = await api.post('/ai/image/enhance', formData, {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            responseType: 'blob',
-            timeout: 120000,
-          });
-        } catch {
-          res = await axios.post(`${AI_URL}/ai/image/enhance`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-            responseType: 'blob',
-            timeout: 120000,
-          });
-        }
-
-        const blob = res.data as Blob;
-        const reader = new FileReader();
-        const b64 = await new Promise<string>((resolve) => {
-          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(blob);
+        const res = await apiPostWithFallback('/ai/image/enhance', formData, {
+          timeout: 120000,
+          isFormData: true,
+          responseType: 'arraybuffer',
         });
 
-        const enhUrl = `data:image/jpeg;base64,${b64}`;
+        // Convert ArrayBuffer → base64 cleanly without Node buffer
+        const b64 = arrayBufferToBase64(res.data);
+        const enhUrl = b64.startsWith('data:') ? b64 : `data:image/jpeg;base64,${b64}`;
+
         setProcessedImages((prev) => ({ ...prev, enhanced: enhUrl }));
         setActiveTab('enhanced');
         setDoneStages([2]);

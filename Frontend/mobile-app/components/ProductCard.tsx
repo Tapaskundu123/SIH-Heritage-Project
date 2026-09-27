@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Colors, Fonts, Radius, Spacing } from '../constants/theme';
+import { resolveImageUrl } from '../constants/api';
 
 interface Product {
   _id: string;
@@ -19,11 +20,12 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, onPress }: ProductCardProps) {
+  const imageUrl = resolveImageUrl(product.images?.[0]?.url);
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.8}>
       <View style={styles.imageBox}>
-        {product.images?.[0]?.url ? (
-          <Image source={{ uri: product.images[0].url }} style={styles.image} />
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.image} />
         ) : (
           <View style={styles.imagePlaceholder}>
             <Feather name="package" size={24} color={Colors.textDim} />

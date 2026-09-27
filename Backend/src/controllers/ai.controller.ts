@@ -128,6 +128,39 @@ export const enhanceImage = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+export const processCompleteImage = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'Image file required' });
+      return;
+    }
+
+    const form = new FormData();
+    form.append('image', fs.createReadStream(req.file.path), {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+
+    const response = await axios.post(`${AI_BASE}/ai/image/process-complete`, form, {
+      headers: form.getHeaders(),
+      timeout: 180000,
+    });
+
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.json(response.data);
+  } catch (error: any) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Process complete image error:', error?.message);
+    res.status(500).json({ success: false, message: error?.response?.data?.detail || error?.message || 'Processing failed' });
+  }
+};
+
+
 export const generateCatalog = async (req: Request, res: Response): Promise<void> => {
   try {
     const { productInfo, language } = req.body;

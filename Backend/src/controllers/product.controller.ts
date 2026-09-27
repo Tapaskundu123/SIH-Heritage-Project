@@ -1,26 +1,159 @@
 import { Request, Response } from 'express';
 import Product from '../models/Product';
 import Inventory from '../models/Inventory';
+import User from '../models/User';
+import { saveBase64Image } from '../utils/storage.util';
 
 export const createProduct = async (req: Request & { userId?: string }, res: Response): Promise<void> => {
   try {
+    let artisanId = req.userId;
+    if (!artisanId) {
+      const demoUser = await User.findOne({ role: 'artisan' });
+      artisanId = demoUser?._id?.toString() || '665000000000000000000001';
+    }
+
     const rawStock = req.body.stock !== undefined && req.body.stock !== '' ? Number(req.body.stock) : 10;
     const stock = !isNaN(rawStock) && rawStock > 0 ? rawStock : 10;
-    const productData = { ...req.body, stock, artisanId: req.userId };
+
+    // Normalize images: handles multipart files, AI Studio base64 data URLs, and remote URLs
+    let productImages: Array<{ url: string; isOriginal: boolean; isEnhanced: boolean; isBgRemoved: boolean }> = [];
+
+    // 1. Check for AI Studio base64 image in req.body.image
+    if (req.body.image && typeof req.body.image === 'string') {
+      if (req.body.image.startsWith('data:image/')) {
+        try {
+          const diskUrl = await saveBase64Image(req.body.image, 'ai_studio', 'products');
+          productImages.push({
+            url: diskUrl,
+            isOriginal: false,
+            isEnhanced: true,
+            isBgRemoved: true,
+          });
+        } catch (saveErr) {
+          console.error('Failed to save base64 AI image to disk:', saveErr);
+          // If disk save fails, save data URI directly so it's not lost
+          productImages.push({
+            url: req.body.image,
+            isOriginal: false,
+            isEnhanced: true,
+            isBgRemoved: true,
+          });
+        }
+      } else {
+        productImages.push({
+          url: req.body.image,
+          isOriginal: true,
+          isEnhanced: true,
+          isBgRemoved: false,
+        });
+      }
+    }
+
+    // 2. Check for uploaded files from multipart
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      for (const f of req.files as any[]) {
+        productImages.push({
+          url: `/uploads/${f.filename}`,
+          isOriginal: true,
+          isEnhanced: true,
+          isBgRemoved: false,
+        });
+      }
+    }
+
+    // 3. Check for array of images in req.body.images
+    if (req.body.images) {
+      const imgList = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
+      for (const img of imgList) {
+        const rawUrl = typeof img === 'string' ? img : img.url || '';
+        if (rawUrl.startsWith('data:image/')) {
+          try {
+            const diskUrl = await saveBase64Image(rawUrl, 'ai_studio', 'products');
+            productImages.push({
+              url: diskUrl,
+              isOriginal: false,
+              isEnhanced: true,
+              isBgRemoved: true,
+            });
+          } catch {
+            productImages.push({ url: rawUrl, isOriginal: false, isEnhanced: true, isBgRemoved: true });
+          }
+        } else if (rawUrl) {
+          productImages.push({
+            url: rawUrl,
+            isOriginal: true,
+            isEnhanced: true,
+            isBgRemoved: false,
+          });
+        }
+      }
+    }
+
+    if (productImages.length === 0) {
+      productImages = [
+        {
+          url: 'https://images.unsplash.com/photo-1610030469983-98e550d6193c',
+          isOriginal: true,
+          isEnhanced: true,
+          isBgRemoved: false,
+        },
+      ];
+    }
+
+    // Category mapping to valid enum
+    const rawCategory = (req.body.category || 'other').toLowerCase();
+    const VALID_CATEGORIES = [
+      'textiles', 'pottery', 'jewelry', 'woodwork', 'metalwork',
+      'paintings', 'leather', 'bamboo', 'stone', 'other',
+    ];
+    const category = VALID_CATEGORIES.find((c) => rawCategory.includes(c)) || 'other';
+
+    // Materials array
+    let materials = req.body.materials || [];
+    if (typeof materials === 'string') {
+      materials = materials.split(',').map((m: string) => m.trim()).filter(Boolean);
+    }
+
+    // Tags array
+    let tags = req.body.tags || [];
+    if (typeof tags === 'string') {
+      tags = tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+    }
+
+    const price = Number(req.body.price || req.body.suggestedPrice || 1500);
+
+    const productData = {
+      ...req.body,
+      name: req.body.name || 'Handcrafted Heritage Product',
+      description: req.body.description || 'Authentic handcrafted heritage craft created with traditional Indian craftsmanship.',
+      category,
+      materials,
+      tags,
+      price,
+      suggestedPrice: Number(req.body.suggestedPrice || price),
+      stock,
+      artisanId,
+      images: productImages,
+      isPublished: req.body.isPublished !== undefined ? Boolean(req.body.isPublished) : true,
+      isAIGenerated: true,
+      region: req.body.region || 'India',
+      craftTechnique: req.body.craftTechnique || 'Handmade',
+    };
+
     const product = await Product.create(productData);
 
     // Create inventory record
     await Inventory.create({
       productId: product._id,
-      artisanId: req.userId,
+      artisanId,
       currentStock: product.stock,
       lowStockThreshold: product.lowStockThreshold || 5,
     });
 
-    res.status(201).json({ success: true, data: product });
-  } catch (error) {
+    res.status(201).json({ success: true, data: product, message: 'Product successfully listed to marketplace!' });
+  } catch (error: any) {
     console.error('Create product error:', error);
-    res.status(500).json({ success: false, message: 'Failed to create product' });
+    res.status(500).json({ success: false, message: error?.message || 'Failed to create product' });
   }
 };
 
